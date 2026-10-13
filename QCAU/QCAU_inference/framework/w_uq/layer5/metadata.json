@@ -1,0 +1,22 @@
+{
+  "layer_id": 5,
+  "source_shard": "/root/danh/weight/model-00007-of-00046.safetensors",
+  "weight_name": "layers.5.attn.wq_b.weight",
+  "scale_name": "layers.5.attn.wq_b.scale",
+  "weight_dtype": "F8_E4M3",
+  "weight_shape": [
+    32768,
+    1024
+  ],
+  "scale_dtype": "F8_E8M0",
+  "scale_shape": [
+    256,
+    8
+  ],
+  "weight_file": "w_uq.weight.fp8_hex.txt",
+  "scale_file": "w_uq.scale.e8m0_hex.txt",
+  "weight_order": "row_major; one output row per line; each byte is two hex digits",
+  "scale_order": "row_major; one output row per line; each byte is two hex digits",
+  "linear_semantics": "q_projected = linear(c_q, w_uq.weight) using FP8 activation quantization, block size 128, and FP8 block scales",
+  "actual_qcau_query_up_branch": "callable(w_uq)"
+}

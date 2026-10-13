@@ -1,0 +1,163 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DeepSeek-V4-Pro — Vi kiến trúc 1 chip & Pipeline</title>
+<style>
+ body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#fff;color:#1a1a1a;line-height:1.45}
+ .wrap{max-width:1400px;margin:0 auto;padding:18px 22px 60px}
+ h1{font-size:20px;margin:0 0 6px}
+ p{font-size:13px;color:#333}
+ .mut{color:#6b7280;font-size:12px}
+ .tabs{display:flex;gap:6px;border-bottom:1.5px solid #e5e7eb;margin:10px 0 12px}
+ .tabbtn{padding:7px 16px;border:none;border-bottom:2.5px solid transparent;background:none;cursor:pointer;font-size:14px;color:#6b7280}
+ .tabbtn.on{color:#1e2761;border-bottom-color:#1e2761;font-weight:700}
+ .panel{display:none}.panel.on{display:block}
+ .ctl{margin:8px 0 6px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+ .b{padding:3px 10px;border:.5px solid #cbd5e1;border-radius:7px;cursor:pointer;font-size:12px;background:#fff}
+ .scroll{overflow:auto;border:.5px solid #e5e7eb;border-radius:8px;padding:6px 0;background:#fff;max-height:82vh}
+ .lg{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#6b7280;margin-right:11px}
+ .sw{width:13px;height:13px;border-radius:3px;display:inline-block;border:.5px solid #999}
+ code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px}
+ #tip{position:fixed;display:none;max-width:350px;background:#111827;color:#fff;font-size:11.5px;line-height:1.4;padding:7px 9px;border-radius:7px;box-shadow:0 4px 14px rgba(0,0,0,.25);pointer-events:none;z-index:50}
+</style></head>
+<body><div class="wrap">
+<h1>DeepSeek-V4-Pro Accelerator — Vi kiến trúc một chip &amp; Pipeline</h1>
+<p class="mut">Một chip = 1 trong 4 chip của một card (Agilex 7 AGM 039 · 12.300 DSP · 46 MB M20K · 32 GB HBM2e @820 GB/s). Chi tiết: <code>DeepSeek_V4Pro_SingleChip_Microarchitecture.md</code>.</p>
+<div class="tabs"><button class="tabbtn on" data-t="arch">Vi kiến trúc khối</button><button class="tabbtn" data-t="pipe">Pipeline (FRONT ∥ ECA)</button></div>
+
+<!-- TAB ARCH -->
+<div class="panel on" id="p-arch">
+<p>Đường dữ liệu: <b style="color:#c2691c">HBM</b> → <b style="color:#5b6472">mSGDMA / NoC</b> → <b style="color:#2e7d46">buffer SRAM</b> (WTB/RAB/KVB/PSA) → <b style="color:#5b6472">AGU+arbiter</b> → <b style="color:#1f5fa8">FU</b>. Đường nối góc vuông, nhãn số bit song song. Di chuột vào khối để xem thông số.</p>
+<div class="lg"><span class="sw" style="background:#1f5fa8"></span>Compute (DSP)</div>
+<div class="lg"><span class="sw" style="background:#2e7d46"></span>Buffer (M20K)</div>
+<div class="lg"><span class="sw" style="background:#c2691c"></span>HBM / off-chip</div>
+<div class="lg"><span class="sw" style="background:#5b6472"></span>Control / DMA</div>
+<div class="scroll"><div id="archWrap"></div></div>
+<div class="mut" id="archDet" style="margin-top:8px;background:#f1f5f9;border-radius:8px;padding:8px 10px;min-height:30px">Di chuột vào khối để xem chi tiết.</div>
+</div>
+
+<!-- TAB PIPE -->
+<div class="panel" id="p-pipe">
+<p>Pipeline 2 tầng: <b style="color:#1e4e79">FRONT</b> (FU1–9, DSP attention ~7.000) ∥ <b style="color:#92400e">ECA</b> (FU10, 5.266 DSP + HBM) cho <b>chunk/user khác nhau</b> (wavefront). FRONT(U_{i+1}) chồng ECA(U_i). Băng <b style="color:#6b21a8">tím</b>=ICI. Màu nhạt=user. Hàng <b style="color:#9a3412">mSGDMA</b>=DMA HBM↔buffer.</p>
+<div class="ctl"><span class="mut">Số chunk/user:</span><input id="nsl" type="range" min="2" max="6" step="1" value="4" style="vertical-align:middle;width:150px"><span class="mut" id="nlab">4</span>
+ <span class="mut" style="margin-left:10px">Zoom:</span><span class="b" id="zo">–</span><span class="b" id="zr">Fit</span><span class="b" id="zi">+</span><span class="mut" id="zlab">1.0×</span></div>
+<div class="lg"><span class="sw" style="background:#dbeafe;border-color:#0c447c"></span>mSGDMA weight</div>
+<div class="lg"><span class="sw" style="background:#cfe0f2;border-color:#1e4e79"></span>user A</div>
+<div class="lg"><span class="sw" style="background:#d4f3df;border-color:#27500A"></span>user B…</div>
+<div class="lg"><span class="sw" style="background:#ead9fb;border-color:#6b21a8"></span>ICI</div>
+<div class="lg"><span class="sw" style="background:#f6e4e4;border-color:#c7a6a6"></span>ECA chờ (read-bound)</div>
+<div class="scroll"><div id="pipeWrap"></div></div>
+<p class="note mut" id="pipeSum"></p>
+</div>
+<div id="tip"></div>
+
+<script>
+var BW=820,TOPS=36.9,d=7168,rows=256;
+function r2(x){return x.toFixed(2);}
+function R(x,y,w,h,f,s,sw,tip){return '<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+Math.max(0,w).toFixed(1)+'" height="'+h.toFixed(1)+'" rx="3" fill="'+f+'" stroke="'+s+'" stroke-width="'+sw+'"'+(tip?' data-tip="'+tip.replace(/"/g,'&quot;')+'" style="cursor:help"':'')+'/>';}
+function LN(x1,y1,x2,y2,c,w,arr){return '<line x1="'+x1.toFixed(1)+'" y1="'+y1.toFixed(1)+'" x2="'+x2.toFixed(1)+'" y2="'+y2.toFixed(1)+'" stroke="'+c+'" stroke-width="'+w+'"'+(arr?' marker-end="url(#ar)"':'')+'/>';}
+function T(x,y,t,c,fs,a,b){return '<text x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" font-size="'+(fs||10)+'" fill="'+c+'" text-anchor="'+(a||'start')+'"'+(b?' font-weight="700"':'')+'>'+t+'</text>';}
+
+// ===== TAB 1: BLOCK DIAGRAM =====
+function buildArch(){
+ var CMP='#1f5fa8',BUF='#2e7d46',MEM='#c2691c',CTL='#5b6472';
+ function box(x,y,w,h,fill,t1,t2,t3,tip){var s=R(x,y,w,h,fill,'#ffffff',1,tip);var rows=[{t:t1,fs:13,b:1}];if(t2)rows.push({t:t2,fs:9.5});if(t3)rows.push({t:t3,fs:9.5});var n=rows.length,y0=y+h/2-(n-1)*7;rows.forEach(function(r,i){s+=T(x+w/2,y0+i*14+4,r.t,'#fff',r.fs,'middle',r.b);});return s;}
+ var W=1180,H=600,sv='<svg viewBox="0 0 '+W+' '+H+'" style="min-width:1100px" xmlns="http://www.w3.org/2000/svg"><defs><marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#42546a"/></marker></defs>';
+ // columns
+ sv+=box(24,250,150,120,MEM,'HBM2e','32 GB','820 GB/s','HBM2e in-package · 32 GB · 820 GB/s · giữ ~25 GB weight (slice ~8 layer) + KV cache');
+ sv+=box(214,240,176,150,CTL,'HBM Controller','+ Hard NoC (AXI4)','+ mSGDMA','HBM Controller (hard) → Hard NoC AXI4 → mSGDMA: chuyển HBM↔buffer; weight HBM→WTB, KV KVB→HBM');
+ var bd=[['WTB','16 MB · 32 bank','1024-bit · 96 GB/s','WTB — weight tile, double-buffer 2×8MB, 32 bank, bus 1024-bit'],['RAB','10 MB · 64 bank','2048-bit · 192 GB/s','RAB — activation (X,q,o,ô,y), 64 bank, bus 2048-bit'],['KVB','12 MB · 16 bank','512-bit · 48 GB/s','KVB — KV nóng (top-k + sliding window), 16 bank'],['PSA','6 MB · 8 bank','256-bit · 24 GB/s','PSA — ∑K partial + top-k/router scratch']];
+ var bY=[110,222,334,446];bd.forEach(function(b,i){sv+=box(440,bY[i],196,92,BUF,b[0],b[1],b[2],b[3]);});
+ sv+=box(686,250,150,120,CTL,'AGU + arbiter','(banked M20K','port A read)','AGU sinh địa chỉ + arbiter chọn FU active → Avalon-ST (không AXI-MM cho operand)');
+ var fd=[['mHCE','36 DSP'],['ACU','667 DSP'],['LIU / HCA','1.094 DSP'],['QCAU','2.864 DSP'],['GOPU','2.099 DSP'],['MRU','125 DSP'],['ECA','5.266 DSP'],['ICI','all-to-all/all-reduce']];
+ var ftip=['mHCE — RMSNorm+Sinkhorn+mix · 36 DSP · 0.4 GOP','ACU — KV-compress · 667 DSP · 7.5 GOP · ghi KVB+HBM','LIU(CSA) indexer Top-k / HCA cluster · 1094 DSP · 12.3 GOP','QCAU — MQA+RoPE (head slice, TP) · 2864 DSP · 32.2 GOP','GOPU — output proj (group slice, TP) · 2099 DSP · 23.6 GOP','MRU — router Top-6 · 125 DSP · 1.4 GOP','ECA — SwiGLU expert (expert slice, EP) · 5266 DSP · 59.2 GOP · đọc 3.17 GB/layer (HBM, read-bound)','ICI — all-to-all dispatch/combine + all-reduce ↔ 3 chip còn lại của card'];
+ var fy0=70,fstep=64,fY=[];fd.forEach(function(f,i){var yy=fy0+i*fstep;fY.push(yy+24);sv+=box(886,yy,290,48,(i==7?'#6b21a8':CMP),f[0]+'   '+f[1],null,null,ftip[i]);});
+ sv+=T(886,fy0+8*fstep+2,'Functional Units (slice của chip)','#6b7280',11,'start',1);
+ // wires
+ sv+=LN(174,310,210,310,'#42546a',1.6,true);sv+=T(178,300,'/512','#7a4b12',9,'start',1);
+ // MEM->buffers (write port B): trunk x=414
+ sv+=LN(390,315,414,315,'#42546a',1.4);sv+=LN(414,156,414,492,'#42546a',1.4);
+ bY.forEach(function(y){sv+=LN(414,y+46,440,y+46,'#42546a',1.4,true);});
+ sv+=T(396,505,'write (port B)','#6b7280',9,'start');
+ // buffers->AGU (read port A): trunk x=662
+ var busw=['/1024','/2048','/512','/256'];
+ bY.forEach(function(y,i){sv+=LN(636,y+46,662,y+46,'#42546a',1.4);sv+=T(638,y+40,busw[i],'#7a4b12',8.5,'start',1);});
+ sv+=LN(662,156,662,492,'#42546a',1.4);sv+=LN(662,315,686,315,'#42546a',1.4,true);
+ sv+=T(640,505,'read (port A)','#6b7280',9,'start');
+ // AGU->FU: trunk x=862
+ sv+=LN(836,315,862,315,'#42546a',1.4);sv+=LN(862,fY[0],862,fY[6],'#42546a',1.4);
+ fY.forEach(function(y){sv+=LN(862,y,886,y,'#42546a',1.4,true);});
+ sv+=T(840,305,'operands','#6b7280',8.5,'start');
+ sv+='</svg>';
+ document.getElementById('archWrap').innerHTML=sv;
+}
+
+// ===== TAB 2: PIPELINE FRONT∥ECA =====
+var USERS=['U6','U7','U8','U9','U10','U11'];
+var PAL=[['#cfe0f2','#1e4e79'],['#d4f3df','#27500A'],['#fde9b8','#92400e'],['#e7d9f7','#6b21a8'],['#fcd9d9','#7f1d1d'],['#d9f0f0','#0f766e']];
+var STEPS=[
+ {fu:'mHCE',grp:'F',op:'RMSNorm+mix',gop:0.4,mode:'rep',rid:'X',wid:'A/B/C'},
+ {fu:'ACU',grp:'F',op:'KV-compress',gop:7.5,mode:'rep',wt:'W_aKV/bKV',wmb:14.7,wid:'C^Comp'},
+ {fu:'LIU',grp:'F',op:'indexer Top-k',gop:12.3,mode:'rep',wt:'W_DQ/IUQ',wmb:24,wid:'top-k idx'},
+ {fu:'QCAU',grp:'F',op:'MQA+RoPE',gop:32.2,mode:'tp',wt:'W_UQ',wmb:25.2,wid:'o'},
+ {fu:'GOPU',grp:'F',op:'output proj',gop:23.6,mode:'tp',wt:'W_O',wmb:46,wid:'ô'},
+ {fu:'ICI',grp:'F',op:'all-reduce ô',gop:0,mode:'comm'},
+ {fu:'mHCE',grp:'F',op:'cộng ô',gop:0.4,mode:'rep',rid:'X+ô',wid:'X'},
+ {fu:'MRU',grp:'F',op:'router Top-6',gop:1.4,mode:'rep',wt:'W_router',wmb:2.75,wid:'gating'},
+ {fu:'ICI',grp:'F',op:'a2a dispatch',gop:0,mode:'comm'},
+ {fu:'ECA',grp:'E',op:'SwiGLU expert',gop:59.2,mode:'ep',eca:1,wid:'y'},
+ {fu:'ICI',grp:'B',op:'a2a combine',gop:0,mode:'comm'},
+ {fu:'mHCE',grp:'B',op:"cộng y→X'",gop:0.4,mode:'rep',rid:'X+y',wid:"X'"}
+];
+var Egb=96*33/1000,Eload=Egb*1000/BW,Ecomp=59.2/TOPS,eT=Math.round(Egb*1000/8);
+function compMs(g){return g*rows/256/TOPS;}
+function durOf(s){if(s.eca)return Math.max(Eload,compMs(s.gop));if(s.mode=='comm')return 0.12;return Math.max(0.10,compMs(s.gop));}
+var DUR=STEPS.map(durOf),fIdx=[],eIdx=-1,bIdx=[];STEPS.forEach(function(s,i){if(s.grp=='F')fIdx.push(i);else if(s.grp=='E')eIdx=i;else bIdx.push(i);});
+var cumF=[],fa=0;fIdx.forEach(function(i){cumF.push(fa);fa+=DUR[i];});var FRONTtot=fa;
+var ECAdur=DUR[eIdx],cumB=[],ba=0;bIdx.forEach(function(i){cumB.push(ba);ba+=DUR[i];});var BACKtot=ba,P=Math.max(ECAdur,FRONTtot);
+var ps={n:4,zoom:1};
+function modeName(m){return m=='tp'?'TP':m=='comm'?'ICI':'rep';}
+function buildPipe(){
+ var n=ps.n,Ff=[],Es=[],Ee=[];for(var i=0;i<n;i++){Ff[i]=i*P;Es[i]=Ff[i]+FRONTtot;Ee[i]=Es[i]+ECAdur;}
+ var total=Ee[n-1]+BACKtot,baseS=Math.max(24,Math.min(70,1050/total)),S=baseS*ps.zoom;
+ var L=150,top=44,rh=14,rstep=18,nrow=STEPS.length+1,W=L+total*S+30,botY=top+nrow*rstep,Hh=botY+12;
+ var sv='<svg viewBox="0 0 '+Math.round(W)+' '+Math.round(Hh)+'" style="min-width:'+Math.round(W)+'px" xmlns="http://www.w3.org/2000/svg">';
+ var tstep=S<30?2:1;for(var t=0;t<=Math.ceil(total);t+=tstep){var xx=L+t*S;sv+=LN(xx,top-8,xx,botY,'#f3f4f8',0.6)+T(xx,top-12,t+'ms','#bcc3cf',9,'middle');}
+ sv+=R(4,top+1*rstep,4,8*rstep-3,'#1e4e79','#1e4e79',0)+T(2,top+5*rstep,'FRONT','#1e4e79',9,'start',1);
+ sv+=R(4,top+9*rstep,4,rstep-3,'#92400e','#92400e',0)+T(2,top+9*rstep+11,'ECA','#92400e',9,'start',1);
+ sv+=R(4,top+10*rstep,4,2*rstep-3,'#6b21a8','#6b21a8',0)+T(2,top+10*rstep+11,'BACK','#6b21a8',9,'start',1);
+ var rn=['mSGDMA'].concat(STEPS.map(function(s,i){return (i+1)+'·'+s.fu;}));
+ for(var k=0;k<nrow;k++){var y=top+k*rstep;if(k%2)sv+=R(L,y,total*S,rh,'#fafbfd','#fafbfd',0);sv+=T(52,y+rh-3,rn[k],k==0?'#9a3412':'#444',8.5,'start',k==0);}
+ for(var ci=0;ci<n;ci++){(function(ci){var col=PAL[ci%PAL.length],u=USERS[ci%USERS.length];
+   fIdx.forEach(function(si,kk){var s=STEPS[si],x=L+(Ff[ci]+cumF[kk])*S,w=DUR[si]*S,yy=top+(si+1)*rstep;var cc=s.mode=='comm'?['#ead9fb','#6b21a8']:col;
+     sv+=R(x,yy,w,rh,cc[0],cc[1],1,'FRONT · '+u+' · '+s.fu+' '+s.op+' · '+modeName(s.mode)+' · tensor='+(s.wt||s.rid||'act')+'['+u+'] ('+rows+' row) · GOP='+(s.gop*rows/256).toFixed(2)+(s.wt?' · weight '+s.wt+' '+s.wmb+'MB':''));
+     if(w>16)sv+=T(x+w/2,yy+rh-3,u,cc[1],7.5,'middle');});
+   var ex=L+Es[ci]*S,ew=ECAdur*S,gw=ew*(Ecomp/ECAdur),ey=top+(eIdx+1)*rstep;
+   sv+=R(ex,ey,gw,rh,col[0],col[1],1,'ECA · '+u+' · SwiGLU expert · tensor=y['+u+'] ('+rows+' row) · 59.2 GOP · compute '+r2(Ecomp)+' ms · 5266 DSP');
+   sv+=R(ex+gw,ey,ew-gw,rh,'#f6e4e4','#c7a6a6',1,'ECA · '+u+' — DSP CHỜ weight (read-bound) '+r2(ECAdur-Ecomp)+' ms — batch chunk để lấp');
+   if(ew>16)sv+=T(ex+ew/2,ey+rh-3,u,col[1],7.5,'middle');
+   sv+=R(ex,top,ew,rh,'#dbeafe','#0c447c',1,'mSGDMA · '+u+' · stream expert weight '+Egb.toFixed(2)+' GB ('+eT+' tile) HBM→WTB · '+r2(Eload)+' ms');
+   if(ew>50)sv+=T(ex+ew/2,top+rh-3,Egb.toFixed(2)+' GB','#0c447c',8,'middle');
+   sv+=R(L+Ff[ci]*S,top,Math.max(5,(0.113/BW*1000)*S+5),rh,'#dbeafe','#0c447c',1,'mSGDMA · '+u+' · weight attention 113 MB HBM→WTB (prefetch)');
+   bIdx.forEach(function(si,kk){var s=STEPS[si],x=L+(Ee[ci]+cumB[kk])*S,w=DUR[si]*S,yy=top+(si+1)*rstep;var cc=s.mode=='comm'?['#ead9fb','#6b21a8']:col;sv+=R(x,yy,w,rh,cc[0],cc[1],1,'BACK · '+u+' · '+s.fu+' '+s.op);if(w>16)sv+=T(x+w/2,yy+rh-3,u,cc[1],7.5,'middle');});
+ })(ci);}
+ sv+='</svg>';
+ document.getElementById('pipeWrap').innerHTML=sv;
+ var seqT=n*(FRONTtot+ECAdur+BACKtot);
+ document.getElementById('pipeSum').innerHTML='<b>'+n+' chunk</b>. FRONT '+r2(FRONTtot)+' ms · ECA '+r2(ECAdur)+' ms (HBM-bound) · chu kỳ '+r2(P)+' ms/chunk. Pipeline '+r2(total)+' ms vs tuần tự '+r2(seqT)+' ms ⇒ ×<b>'+(seqT/total).toFixed(2)+'</b>. FRONT(U_{i+1}) ∥ ECA(U_i); ECA mỗi chunk còn chờ '+r2(ECAdur-Ecomp)+' ms (read-bound) → batch để lấp.';
+}
+
+// ===== shared: tabs + floating tip =====
+var TIP=document.getElementById('tip');
+document.body.addEventListener('mousemove',function(e){var t=e.target.closest('[data-tip]');if(t){TIP.textContent=t.getAttribute('data-tip');TIP.style.display='block';var nx=e.clientX+14;if(nx+360>window.innerWidth)nx=e.clientX-360;TIP.style.left=nx+'px';TIP.style.top=(e.clientY+14)+'px';}else TIP.style.display='none';});
+document.querySelectorAll('.tabbtn').forEach(function(b){b.addEventListener('click',function(){document.querySelectorAll('.tabbtn').forEach(function(x){x.classList.remove('on');});b.classList.add('on');document.querySelectorAll('.panel').forEach(function(x){x.classList.remove('on');});document.getElementById('p-'+b.dataset.t).classList.add('on');});});
+// also let arch tip fall into archDet box
+document.getElementById('archWrap')&&document.getElementById('archWrap').addEventListener('mouseover',function(e){var t=e.target.closest('[data-tip]');if(t)document.getElementById('archDet').textContent=t.getAttribute('data-tip');});
+var NSL=document.getElementById('nsl');NSL.addEventListener('input',function(){ps.n=+NSL.value;document.getElementById('nlab').textContent=ps.n;buildPipe();});
+function setZ(z){ps.zoom=Math.max(0.5,Math.min(6,z));document.getElementById('zlab').textContent=ps.zoom.toFixed(1)+'×';buildPipe();}
+document.getElementById('zi').addEventListener('click',function(){setZ(ps.zoom*1.3);});
+document.getElementById('zo').addEventListener('click',function(){setZ(ps.zoom/1.3);});
+document.getElementById('zr').addEventListener('click',function(){setZ(1);});
+document.getElementById('pipeWrap').addEventListener('wheel',function(e){if(e.ctrlKey||e.metaKey){e.preventDefault();setZ(ps.zoom*(e.deltaY<0?1.12:0.89));}},{passive:false});
+buildArch();buildPipe();
+</script>
+<p class="mut" style="margin-top:22px">DeepSeek-V4-Pro Accelerator · tài liệu nội bộ · vi kiến trúc 1 chip + pipeline. Spec: <code>DeepSeek_V4Pro_SingleChip_Microarchitecture.md</code>.</p>
+</div></body></html>

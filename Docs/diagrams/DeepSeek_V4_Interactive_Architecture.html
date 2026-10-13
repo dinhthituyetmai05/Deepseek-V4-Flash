@@ -1,0 +1,1757 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<title>DeepSeek-V4 — Kiến trúc tương tác</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root {
+    --bg: #0e1218; --panel: #161c26; --panel2: #1e2632; --border: #2a3444;
+    --text: #e6edf3; --muted: #8b96a8;
+    --accent: #5ab0ff; --accent2: #ffbf66;
+    --green: #57d39b; --pink: #ff8db1; --purple: #c198ff; --red: #ff7474;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,"Segoe UI","Inter","Helvetica Neue",Arial,sans-serif;
+    font-size:14px; line-height:1.5; }
+  header { padding:14px 22px; border-bottom:1px solid var(--border);
+    display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; }
+  header h1 { margin:0; font-size:18px; }
+  header h1 small { color:var(--muted); font-weight:400; margin-left:8px; }
+  .toggle { display:flex; background:var(--panel2); border:1px solid var(--border);
+    border-radius:8px; overflow:hidden; }
+  .toggle button { background:transparent; color:var(--muted); border:0;
+    padding:7px 14px; cursor:pointer; font-weight:600; font-size:13px; }
+  .toggle button.active { background:var(--accent); color:#0b1622; }
+  nav.tabs { display:flex; flex-wrap:wrap; gap:4px; padding:10px 22px;
+    background:var(--panel); border-bottom:1px solid var(--border); }
+  nav.tabs button { background:transparent; color:var(--muted); border:1px solid transparent;
+    padding:8px 14px; border-radius:6px; cursor:pointer; font-weight:600; font-size:13px; }
+  nav.tabs button:hover { color:var(--text); background:var(--panel2); }
+  nav.tabs button.active { color:var(--text); background:var(--panel2); border-color:var(--accent); }
+  main { display:grid; grid-template-columns: 1fr 480px; min-height: calc(100vh - 110px); }
+  @media (max-width:1100px) { main { grid-template-columns: 1fr; } }
+  .canvas { padding:22px; overflow:auto; }
+  .canvas h2 { font-size:16px; margin:0 0 6px 0; }
+  .canvas p.lead { color:var(--muted); margin:0 0 14px 0; }
+  .frame { background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:18px; overflow:auto; }
+  .side { border-left:1px solid var(--border); background:var(--panel);
+    padding:22px; overflow:auto; }
+  .side h3 { margin:0 0 4px 0; font-size:15px; }
+  .side .tag { display:inline-block; padding:2px 8px; border-radius:4px;
+    font-size:11px; font-weight:700; letter-spacing:0.3px; margin-right:6px; }
+  .tag.att  { background:rgba(90,176,255,0.18);  color:var(--accent); }
+  .tag.moe  { background:rgba(193,152,255,0.18); color:var(--purple); }
+  .tag.mhc  { background:rgba(87,211,155,0.18);  color:var(--green); }
+  .tag.emb  { background:rgba(255,191,102,0.18); color:var(--accent2); }
+  .tag.mtp  { background:rgba(255,141,177,0.18); color:var(--pink); }
+  .tag.util { background:rgba(255,116,116,0.18); color:var(--red); }
+  .side h4 { margin:18px 0 6px 0; font-size:12px; text-transform:uppercase;
+    letter-spacing:1px; color:var(--muted); border-bottom:1px dashed var(--border); padding-bottom:4px; }
+  .side .row { display:grid; grid-template-columns:150px 1fr; gap:8px; padding:4px 0;
+    border-bottom:1px dotted var(--border); }
+  .side .row .k { color:var(--muted); font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+  .side .row .v { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; word-break:break-word; }
+  .side .formula { background:var(--panel2); border:1px solid var(--border);
+    padding:10px 12px; border-radius:8px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:12.5px; white-space:pre-wrap; word-break:break-word; margin-top:6px; color:#d8e2ec; }
+  .placeholder { color:var(--muted); padding:14px; border:1px dashed var(--border);
+    border-radius:8px; }
+  svg { display:block; }
+  .node { cursor:pointer; }
+  .node rect { transition:filter 0.15s, stroke-width 0.15s; }
+  .node:hover rect { filter:brightness(1.15); stroke-width:2.5; }
+  .node.selected rect { stroke:#fff; stroke-width:3; }
+  .node text { fill:var(--text); font-weight:600; pointer-events:none; }
+  .node text.sub { fill:var(--muted); font-weight:400; font-size:10.5px; }
+  .node.small text { font-size:9px; font-weight:500; }
+  .node.small rect { stroke-width:0.7; }
+  .node.header rect { stroke-dasharray:5 4; fill-opacity:0.45; }
+  .node.header text { font-size:12px; font-weight:700; }
+  .arrow { stroke:#7a8aa3; stroke-width:1.8; fill:none; marker-end:url(#arrowhead);
+    stroke-linejoin:round; stroke-linecap:round; }
+  .arrow-label { fill:var(--muted); font-size:10.5px; font-family:ui-monospace,Menlo,monospace; }
+  .legend { font-size:11px; color:var(--muted); margin-top:10px; }
+  .legend span { margin-right:14px; }
+  .legend span::before { content:''; display:inline-block; width:10px; height:10px;
+    margin-right:5px; vertical-align:middle; border-radius:2px; }
+  .lg-att::before  { background:#2a4d72; }
+  .lg-moe::before  { background:#4a3a6b; }
+  .lg-mhc::before  { background:#2d5a47; }
+  .lg-emb::before  { background:#6b5234; }
+  .lg-mtp::before  { background:#6b3a4f; }
+  .lg-util::before { background:#5a3232; }
+  .note { background:var(--panel2); border:1px solid var(--border); border-radius:8px;
+    padding:10px 12px; font-size:12.5px; color:var(--muted); margin-top:12px; }
+  footer { padding:10px 22px; border-top:1px solid var(--border); color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>DeepSeek-V4 — Kiến trúc tương tác <small>Notation: HOA = kích thước; thường = chỉ số</small></h1>
+  <div class="toggle" id="variant-toggle">
+    <button data-variant="flash" class="active">V4-Flash (284B/13B)</button>
+    <button data-variant="pro">V4-Pro (1.6T/49B)</button>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-tab="overall" class="active">Toàn mạng (dataflow)</button>
+  <button data-tab="transformer">Transformer Block</button>
+  <button data-tab="mhc">mHC</button>
+  <button data-tab="csa">CSA</button>
+  <button data-tab="hca">HCA</button>
+  <button data-tab="moe">DeepSeekMoE</button>
+  <button data-tab="emb">Embedding & MTP</button>
+</nav>
+
+<main>
+  <section class="canvas">
+    <div id="tab-title"><h2>—</h2><p class="lead">—</p></div>
+    <div class="frame">
+      <svg id="diagram" viewBox="0 0 980 720">
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+            <polygon points="0 0, 10 4, 0 8" fill="#7a8aa3"/>
+          </marker>
+        </defs>
+      </svg>
+      <div class="legend">
+        <span class="lg-emb">Embedding/Output</span>
+        <span class="lg-mhc">mHC residual</span>
+        <span class="lg-att">Attention (CSA/HCA/SWA)</span>
+        <span class="lg-moe">DeepSeekMoE FFN</span>
+        <span class="lg-mtp">MTP</span>
+        <span class="lg-util">Utility / Norm</span>
+      </div>
+      <div class="note" id="diagram-note"></div>
+    </div>
+  </section>
+
+  <aside class="side" id="side">
+    <div class="placeholder">Chọn một khối để xem chi tiết.</div>
+  </aside>
+</main>
+
+<footer>
+  Tài liệu nội bộ — PGS.TS Nguyễn Đức Minh, HUST/SEEE. Reference: DeepSeek-V4 Technical Report (05/2026), §2, §4.2.1.
+</footer>
+
+<script>
+/* ============================================================
+   CFG — Cấu hình 2 biến thể với notation HOA
+   ============================================================ */
+const CFG = {
+  flash: {
+    label:"V4-Flash",
+    // Runtime example
+    B: 4, L_seq: 4096,
+    // Model
+    L_block: 43,
+    V: 128000, D: 4096,
+    N: 4, T_max: 20,
+    H: 64, C: 512, D_C: 1024,
+    H_I: 64, C_I: 128,
+    M: 4, M_p: 128, K_topk: 512, W_win: 128,
+    G: 8, D_G: 1024,
+    E: 256, E_shared: 1, E_act: 6, D_FF: 2048,
+    mtp_depth: 1,
+    total:"284 B", activated:"13 B"
+  },
+  pro: {
+    label:"V4-Pro",
+    B: 4, L_seq: 4096,
+    L_block: 61,
+    V: 128000, D: 7168,
+    N: 4, T_max: 20,
+    H: 128, C: 512, D_C: 1536,
+    H_I: 64, C_I: 128,
+    M: 4, M_p: 128, K_topk: 1024, W_win: 128,
+    G: 16, D_G: 1024,
+    E: 384, E_shared: 1, E_act: 6, D_FF: 3072,
+    mtp_depth: 1,
+    total:"1.6 T", activated:"49 B"
+  }
+};
+
+let variant = "flash";
+let currentTab = "overall";
+let selectedNodeId = null;
+
+/* ============================================================
+   Helpers
+   ============================================================ */
+function fmt(n) {
+  if (!isFinite(n) || n === 0) return "0";
+  if (n >= 1e9) return (n/1e9).toFixed(2)+" G";
+  if (n >= 1e6) return (n/1e6).toFixed(2)+" M";
+  if (n >= 1e3) return (n/1e3).toFixed(2)+" K";
+  return String(n);
+}
+function bytesFmt(n) {
+  if (n >= 1024**3) return (n/1024**3).toFixed(2)+" GiB";
+  if (n >= 1024**2) return (n/1024**2).toFixed(2)+" MiB";
+  if (n >= 1024)    return (n/1024).toFixed(2)+" KiB";
+  return n+" B";
+}
+
+/* ============================================================
+   NODES — Knowledge base
+   Notation: shape dùng [A × B × C], slicing 0:N−1.
+   Mỗi input/output có 'from' (nơi tạo) và 'to' (nơi dùng).
+   ============================================================ */
+const NODES = {
+
+  input_tokens: {
+    title:"Khối 0 — Input Tokenization",
+    tag:["util","Khối 0"],
+    desc:"CPU pipeline: raw text → token_ids. Không phải neural net.",
+    inputs: c => [{name:"raw text", shape:"string"}],
+    weights: c => [{name:"tokenizer vocab", shape:`V = ${c.V}`, params:0, dtype:"int"}],
+    outputs: c => [
+      {name:"token_ids[B × L]", shape:`= [${c.B} × ${c.L_seq}]`, dtype:"int32",
+       from:"tokenizer.encode(text)",
+       to:["Khối 1 (Embedding)", "Khối 40-Hash (3 layer đầu MoE)", "Khối 53 (MTP)"]}
+    ],
+    ops: c => `// === PHÉP TOÁN ===
+// 3 bước CPU: pre-tokenize, vocab lookup, pad/truncate đến L.
+//   token_ids[b, l] ∈ {0, ..., V−1} = {0, ..., ${c.V-1}}
+//     với b ∈ {0, ..., ${c.B-1}}, l ∈ {0, ..., ${c.L_seq-1}}`,
+    notes:"Vocab 128K kế thừa tokenizer V3."
+  },
+
+  embed: {
+    title:"Khối 1 — Token Embedding (gather, 0 MAC)",
+    tag:["emb","Khối 1"],
+    desc:"Tra cứu vector embedding cho token_ids. Phép gather (lookup) chuẩn.",
+    inputs: c => [
+      {name:"token_ids[B × L]", shape:`= [${c.B} × ${c.L_seq}]`, dtype:"int32",
+       range:`token_ids[b, l] ∈ {0, ..., V−1} = {0, ..., ${c.V-1}}`,
+       from:"Khối 0 (Tokenizer)"}
+    ],
+    weights: c => [
+      {name:"W_emb[V × D]", shape:`= [${c.V} × ${c.D}]`, params:c.V*c.D, dtype:"BF16",
+       desc:"Hàng v là vector D chiều biểu diễn token có ID = v."}
+    ],
+    outputs: c => [
+      {name:"H_0[B × L × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.D}]`, bytes:c.B*c.L_seq*c.D*2,
+       dtype:"BF16",
+       from:"W_emb(token_ids[b, l], 0:D−1) — gather, KHÔNG có MAC",
+       to:["Khối 2 (mHC Init)", "Khối 53 (MTP)"]}
+    ],
+    ops: c => `// === BIẾN MỚI ===
+//   B = ${c.B}   — batch size (ví dụ)
+//   L = ${c.L_seq} — sequence length (ví dụ)
+//   V = ${c.V} — vocab size
+//   D = ${c.D}   — hidden dimension
+
+// === PHÉP TOÁN: gather (lookup), KHÔNG có MAC ===
+//   H_0[b, l, 0:D−1] = W_emb(token_ids[b, l], 0:D−1)
+//      với b ∈ {0, ..., ${c.B-1}}, l ∈ {0, ..., ${c.L_seq-1}}
+
+// === ĐỌC ===
+// Với mỗi (b, l), lấy ID nguyên token_ids[b, l] làm chỉ số HÀNG của W_emb;
+// gán nguyên hàng D = ${c.D} phần tử đó vào H_0[b, l, 0:D−1].
+
+// === PyTorch tương đương ===
+//   H_0 = W_emb[token_ids]     hoặc  F.embedding(token_ids, W_emb)
+
+// === Cost ===  0 MAC; memory read/token = D · 2 = ${c.D*2} B BF16.`,
+    notes:"Có thể tied với LM head (Khối 52)."
+  },
+
+  mhc_init: {
+    title:"Khối 2 — mHC Residual Expansion (broadcast, 0 MAC)",
+    tag:["mhc","Khối 2"],
+    desc:"Mở rộng residual từ D thành N kênh. Các sublayer sau sẽ trộn N kênh qua A, B, C.",
+    inputs: c => [
+      {name:"H_0[B × L × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.D}]`, from:"Khối 1"}
+    ],
+    weights: c => [{name:"(không có weight)", shape:"-", params:0}],
+    outputs: c => [
+      {name:"X_0[B × L × N × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.N} × ${c.D}]`,
+       bytes:c.B*c.L_seq*c.N*c.D*2, dtype:"BF16",
+       from:"broadcast H_0 qua trục N (0 MAC, 0 copy)",
+       to:["Khối 3 (RMSNorm block 1)", "Khối 6 (mix â)", "Khối 31 (sinh B̃)", "Khối 35 (residual update)"]}
+    ],
+    ops: c => `// === BIẾN MỚI ===
+//   N = ${c.N} — mHC channels (số "bản copy" residual)
+// VÌ SAO N=4? Paper §2.2: trộn qua ma trận Birkhoff B[N×N]. N=1 suy biến về
+// residual chuẩn; N=2 spectral norm bound yếu; N=4 vừa rich vừa rẻ (Sinkhorn 4×4).
+
+// === PHÉP TOÁN: broadcast, 0 MAC ===
+//   X_0[b, l, k, 0:D−1] = H_0[b, l, 0:D−1]
+//      với b ∈ {0, ..., ${c.B-1}}, l ∈ {0, ..., ${c.L_seq-1}}, k ∈ {0, 1, 2, 3}
+
+// === PyTorch tương đương ===
+//   X_0 = H_0.unsqueeze(2).expand(B, L, N, D)
+//   (expand KHÔNG copy — chỉ tạo view stride=0 trên trục N)`,
+    notes:"Residual width N=4 tách rời D → scaling phụ rẻ."
+  },
+
+  mhc_norm: {
+    title:"Khối 3 — RMSNorm trên (N, D) per token",
+    tag:["util","Khối 3"],
+    desc:"Chuẩn hoá CHUNG cả N·D phần tử của mini-tensor mỗi token (cùng 1 scalar rms).",
+    inputs: c => [
+      {name:"X_l[B × L × N × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.N} × ${c.D}]`,
+       from:"Khối 2 (block 1) hoặc Khối 49 của block (τ−1)",
+       desc:"X_l cũng fan-out song song tới Khối 6, 31, 35."}
+    ],
+    weights: c => [
+      {name:"γ_RMSNorm[N × D]", shape:`= [${c.N} × ${c.D}]`, params:c.N*c.D, dtype:"BF16"}
+    ],
+    outputs: c => [
+      {name:"X̂[B × L × N × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.N} × ${c.D}]`,
+       from:"γ ⊙ X_l / rms",
+       to:["Khối 4 (sinh Ã)", "Khối 31 (sinh B̃)", "Khối 33 (sinh C̃)"]}
+    ],
+    ops: c => `// === PHÉP TOÁN ===
+// Bước 1 — 1 scalar rms PER TOKEN (chuẩn hoá CHUNG N·D = ${c.N*c.D} phần tử):
+//   ms[b, l]  = (1/(N·D)) · Σ_{k=0}^{N−1} Σ_{i=0}^{D−1} X_l[b, l, k, i]²
+//   rms[b, l] = sqrt(ms[b, l] + ε)     ε = 10⁻⁶
+//
+// Bước 2 — Scale element-wise (broadcast γ sang B, L):
+//   X̂[b, l, k, i] = γ_RMSNorm[k, i] · X_l[b, l, k, i] / rms[b, l]
+//     với b ∈ {0,...,${c.B-1}}, l ∈ {0,...,${c.L_seq-1}}, k ∈ {0,1,2,3}, i ∈ {0,...,${c.D-1}}
+
+// === PyTorch ===
+//   ms = X_l.pow(2).mean(dim=(-2,-1), keepdim=True)
+//   X̂ = γ_RMSNorm * X_l * torch.rsqrt(ms + eps)`,
+    notes:""
+  },
+
+  mhc_dyn_params: {
+    title:"Khối 4 — Sinh Ã (input gate mHC, einsum)",
+    tag:["mhc","Khối 4"],
+    desc:"Cùng pipeline áp cho B̃ (Khối 31 với W_res) và C̃ (Khối 33 với W_post).",
+    inputs: c => [{name:"X̂[B × L × N × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.N} × ${c.D}]`, from:"Khối 3"}],
+    weights: c => [
+      {name:"W_pre[N × D × N]", shape:`= [${c.N} × ${c.D} × ${c.N}]`, params:c.N*c.D*c.N, dtype:"BF16"},
+      {name:"S_pre[N]", shape:`= [${c.N}]`, params:c.N, desc:"Bias tĩnh."},
+      {name:"α_pre", shape:"scalar", params:1, desc:"Gating khởi tạo ~10⁻³."}
+    ],
+    outputs: c => [
+      {name:"Ã[B × L × N]", shape:`= [${c.B} × ${c.L_seq} × ${c.N}]`,
+       from:"α_pre · einsum(X̂, W_pre) + S_pre",
+       to:["Khối 5 (sigmoid bound)"]}
+    ],
+    ops: c => `// === PHÉP TOÁN ===
+//   Ã[b, l, 0:N−1] = α_pre · einsum("ki, kio -> o", X̂[b, l], W_pre) + S_pre[0:N−1]
+
+// === GIẢI THÍCH einsum "ki, kio -> o" ===
+// Input 1: X̂[b, l] có 2 trục (k, i), (N, D) = (${c.N}, ${c.D}).
+// Input 2: W_pre có 3 trục (k, i, o), (N, D, N) = (${c.N}, ${c.D}, ${c.N}).
+// Output: 1 trục (o), N = ${c.N}.
+//
+// QUY TẮC: chữ có ở input nhưng KHÔNG ở output ⇒ SUM trên trục đó.
+//   - k ở cả 2 input, không ở output ⇒ Σ trên k = 0..${c.N-1}.
+//   - i ở cả 2 input, không ở output ⇒ Σ trên i = 0..${c.D-1}.
+//   - o chỉ ở Input 2 và output ⇒ giữ.
+//
+// TƯƠNG ĐƯƠNG Σ:
+//   einsum_result[o] = Σ_{k=0}^{N−1} Σ_{i=0}^{D−1} X̂[b, l, k, i] · W_pre[k, i, o]
+//      với o ∈ {0, 1, 2, 3}
+
+// === Cost / token === N · D · N = ${c.N*c.D*c.N} MAC`,
+    notes:"Cùng pipeline áp cho B̃ (Khối 31) và C̃ (Khối 33)."
+  },
+
+  mhc_sigmoid: {
+    title:"Khối 5 — Sigmoid bound (A, C)",
+    tag:["util","Khối 5"],
+    desc:"A ∈ (0, 1), C ∈ (0, 2) element-wise. Áp song song cho Ã và C̃.",
+    inputs: c => [
+      {name:"Ã[B × L × N]", shape:`= [${c.B} × ${c.L_seq} × ${c.N}]`, from:"Khối 4"},
+      {name:"C̃[B × L × N × 1]", shape:`= [${c.B} × ${c.L_seq} × ${c.N} × 1]`, from:"Khối 33"}
+    ],
+    weights: c => [{name:"(không có weight)", shape:"-", params:0}],
+    outputs: c => [
+      {name:"A[B × L × N]", shape:`= [${c.B} × ${c.L_seq} × ${c.N}]`,
+       from:"sigmoid(Ã)", to:["Khối 6 (mix â)"], desc:"∈ (0, 1)"},
+      {name:"C[B × L × N × 1]", shape:`= [${c.B} × ${c.L_seq} × ${c.N} × 1]`,
+       from:"2 · sigmoid(C̃)", to:["Khối 35 (residual update)"], desc:"∈ (0, 2)"}
+    ],
+    ops: c => `// === PHÉP TOÁN (element-wise) ===
+//   A[b, l, k]    = 1 / (1 + exp(−Ã[b, l, k]))          ∈ (0, 1)
+//   C[b, l, k, 0] = 2 / (1 + exp(−C̃[b, l, k, 0]))       ∈ (0, 2)
+
+// === Ví dụ số ===
+//   Ã[..., :] = [-0.50, 0.20, 1.00, -0.10]
+//   A[..., :] = sigmoid(Ã) ≈ [0.378, 0.550, 0.731, 0.475]
+//   C̃[..., :, 0] = [0.30, -0.40, 0.00, 0.80]
+//   C[..., :, 0] = 2·sigmoid(C̃) ≈ [1.149, 0.803, 1.000, 1.380]`,
+    notes:"A: input gate. C: output gate."
+  },
+
+  mhc_update: {
+    title:"Khối 6/35 — Mix â + Residual Update (mHC core equations)",
+    tag:["mhc","Khối 6/35"],
+    desc:"Khối 6: â = einsum(A, X_l). Khối 35: X_l_new = einsum(B, X_l) + C ⊙ out.",
+    inputs: c => [
+      {name:"X_l[B × L × N × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.N} × ${c.D}]`, from:"Khối 2 / 49"},
+      {name:"A[B × L × N]", shape:`= [${c.B} × ${c.L_seq} × ${c.N}]`, from:"Khối 5"},
+      {name:"B[B × L × N × N]", shape:`= [${c.B} × ${c.L_seq} × ${c.N} × ${c.N}]`, from:"Khối 32"},
+      {name:"C[B × L × N × 1]", shape:`= [${c.B} × ${c.L_seq} × ${c.N} × 1]`, from:"Khối 5"},
+      {name:"out_att[B × L × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.D}]`, from:"Khối 30 / 19H"}
+    ],
+    weights: c => [{name:"(không có weight)", shape:"-", params:0}],
+    outputs: c => [
+      {name:"â[B × L × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.D}]`,
+       from:"einsum(A, X_l)",
+       to:["Khối 7-10 (KV proj CSA)", "Khối 14 (Query down-proj)", "Khối 23 (SWA branch)"]},
+      {name:"X_l_new[B × L × N × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.N} × ${c.D}]`,
+       from:"einsum(B, X_l) + C ⊙ out_att", to:["Khối 36 (Post-mHC MoE)"]}
+    ],
+    ops: c => `// === KHỐI 6: Mix tạo â (input cho sublayer) ===
+//   â[b, l, 0:D−1] = einsum("k, ki -> i", A[b, l], X_l[b, l])
+//
+// GIẢI THÍCH "k, ki -> i":
+//   A[b, l] có (k), (N)=${c.N}. X_l[b, l] có (k, i), (N, D)=(${c.N}, ${c.D}).
+//   k ở cả 2 input, không output ⇒ Σ trên k.
+//   i chỉ ở Input 2 và output ⇒ giữ.
+// TƯƠNG ĐƯƠNG Σ (linear combination 4 kênh):
+//   â[b, l, i] = A[..,0]·X_l[..,0,i] + A[..,1]·X_l[..,1,i]
+//              + A[..,2]·X_l[..,2,i] + A[..,3]·X_l[..,3,i]
+
+// === KHỐI 35: Residual update sau sublayer ===
+//   X_l_new[b, l] = einsum("kj, ji -> ki", B[b, l], X_l[b, l])
+//                 + C[b, l] ⊙ out_att[b, l].unsqueeze(0)
+//
+// TƯƠNG ĐƯƠNG Σ:
+//   mix[k, i] = Σ_{j=0}^{N−1} B[b, l, k, j] · X_l[b, l, j, i]
+//   X_l_new[b, l, k, i] = mix[k, i] + C[b, l, k, 0] · out_att[b, l, i]`,
+    notes:"Cùng pipeline áp lần 2 (Khối 36-49) cho phía MoE."
+  },
+
+  mhc_sinkhorn: {
+    title:"Khối 32 — Sinkhorn–Knopp Projection (B̃ → B)",
+    tag:["mhc","Khối 32"],
+    desc:"Chiếu B̃ vào đa tạp Birkhoff (doubly stochastic) qua T_max = 20 vòng row/col normalize.",
+    inputs: c => [
+      {name:"B̃[B × L × N × N]", shape:`= [${c.B} × ${c.L_seq} × ${c.N} × ${c.N}]`, from:"Khối 31"}
+    ],
+    weights: c => [{name:"(không có weight)", shape:"-", params:0}],
+    outputs: c => [
+      {name:"B[B × L × N × N]", shape:`= [${c.B} × ${c.L_seq} × ${c.N} × ${c.N}]`,
+       from:"Sinkhorn-Knopp (exp + row/col normalize × T_max)",
+       to:["Khối 35 (residual update)"],
+       desc:"Doubly stochastic: row sums = col sums = 1, B ≥ 0, ||B||₂ ≤ 1"}
+    ],
+    ops: c => `// === BIẾN MỚI ===
+//   T_max = ${c.T_max} — số vòng Sinkhorn
+
+// === PHÉP TOÁN (per token, ma trận N×N) ===
+// Bước 1 — Element-wise exp:  M^(0) = exp(B̃)
+// Bước 2 — Lặp T_max vòng (t = 1, ..., T_max):
+//   M^(t-0.5) = M^(t-1) / M^(t-1).sum(dim=-1, keepdim=True)   # row normalize
+//   M^(t)     = M^(t-0.5) / M^(t-0.5).sum(dim=-2, keepdim=True) # col normalize
+// Bước 3 — Kết quả: B = M^(T_max)
+
+// === Ví dụ ===
+//   B̃ = [[ 0.2, -0.1,  0.5,  0.0],
+//        [-0.3,  0.6,  0.1,  0.2],
+//        [ 0.4,  0.0, -0.2,  0.3],
+//        [ 0.1,  0.4,  0.2, -0.4]]
+//   B (sau 20 vòng) ≈
+//       [[0.27, 0.19, 0.36, 0.18],
+//        [0.16, 0.36, 0.20, 0.28],
+//        [0.32, 0.18, 0.18, 0.32],
+//        [0.25, 0.27, 0.26, 0.22]]  # sums ≈ 1.0 trên cả row và col`,
+    notes:"||B||₂ ≤ 1 ⇒ non-expansive; tăng numerical stability."
+  },
+
+  csa_kv_proj: {
+    title:"Khối 7-10 — CSA: KV projection (4 matrix multiply song song)",
+    tag:["att","Khối 7-10"],
+    desc:"Sinh 2 nhánh Key (C_a, C_b) và 2 trọng số nén (Z_a, Z_b). Mỗi nhánh là 1 phép H @ W chuẩn.",
+    inputs: c => [
+      {name:"H[B × L × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.D}]`,
+       from:"Khối 6 (â — toàn câu làm nguồn KV)"}
+    ],
+    weights: c => [
+      {name:"W_aKV[D × C]", shape:`= [${c.D} × ${c.C}]`, params:c.D*c.C, dtype:"BF16"},
+      {name:"W_bKV[D × C]", shape:`= [${c.D} × ${c.C}]`, params:c.D*c.C, dtype:"BF16"},
+      {name:"W_aZ[D × C]",  shape:`= [${c.D} × ${c.C}]`, params:c.D*c.C, dtype:"BF16"},
+      {name:"W_bZ[D × C]",  shape:`= [${c.D} × ${c.C}]`, params:c.D*c.C, dtype:"BF16"}
+    ],
+    outputs: c => [
+      {name:"C_a[B × L × C]", shape:`= [${c.B} × ${c.L_seq} × ${c.C}]`, from:"H @ W_aKV", to:["Khối 11"]},
+      {name:"C_b[B × L × C]", shape:`= [${c.B} × ${c.L_seq} × ${c.C}]`, from:"H @ W_bKV", to:["Khối 11"]},
+      {name:"Z_a[B × L × C]", shape:`= [${c.B} × ${c.L_seq} × ${c.C}]`, from:"H @ W_aZ",  to:["Khối 11 (weight softmax)"]},
+      {name:"Z_b[B × L × C]", shape:`= [${c.B} × ${c.L_seq} × ${c.C}]`, from:"H @ W_bZ",  to:["Khối 11"]}
+    ],
+    ops: c => `// === BIẾN MỚI ===
+//   C = ${c.C} — head dimension. Nén D=${c.D} chiều xuống C=${c.C} chiều.
+
+// === PHÉP TOÁN: 4 matrix multiply song song ===
+//   C_a = H @ W_aKV        shape [B × L × C]
+//   C_b = H @ W_bKV
+//   Z_a = H @ W_aZ
+//   Z_b = H @ W_bZ
+
+// === GIẢI THÍCH '@' (matrix multiplication) ===
+// Ví dụ C_a = H @ W_aKV:
+//   H có B·L hàng, mỗi hàng H[b, l, 0:D−1] là vector D chiều.
+//   W_aKV có C cột, mỗi cột W_aKV[0:D−1, j] là vector D chiều.
+//   C_a[b, l, j] = dot product giữa H[b, l, :] và W_aKV[:, j].
+// TƯƠNG ĐƯƠNG Σ:
+//   C_a[b, l, j] = Σ_{i=0}^{D−1} H[b, l, i] · W_aKV[i, j]
+//      với b ∈ {0,...,${c.B-1}}, l ∈ {0,...,${c.L_seq-1}}, j ∈ {0,...,${c.C-1}}
+
+// === Cost / sequence === 4·B·L·D·C = ${(4*c.B*c.L_seq*c.D*c.C/1e9).toFixed(2)} G MAC`,
+    notes:"C_a/C_b làm Value; Z_a/Z_b làm weight softmax trong Khối 11."
+  },
+
+  csa_compress: {
+    title:"Khối 11 — CSA Overlapped Compression (slice + softmax + weighted sum)",
+    tag:["att","Khối 11"],
+    desc:"Mỗi block-nén i gom 2M = 8 token (4 từ nhánh a + 4 từ nhánh b) thành 1 entry.",
+    inputs: c => [
+      {name:"C_a[B × L × C]", shape:`= [${c.B} × ${c.L_seq} × ${c.C}]`, from:"Khối 7"},
+      {name:"C_b[B × L × C]", shape:`= [${c.B} × ${c.L_seq} × ${c.C}]`, from:"Khối 8"},
+      {name:"Z_a[B × L × C]", shape:`= [${c.B} × ${c.L_seq} × ${c.C}]`, from:"Khối 9"},
+      {name:"Z_b[B × L × C]", shape:`= [${c.B} × ${c.L_seq} × ${c.C}]`, from:"Khối 10"}
+    ],
+    weights: c => [
+      {name:"B_a[M × C]", shape:`= [${c.M} × ${c.C}]`, params:c.M*c.C, desc:"Positional bias a."},
+      {name:"B_b[M × C]", shape:`= [${c.M} × ${c.C}]`, params:c.M*c.C, desc:"Positional bias b."}
+    ],
+    outputs: c => [
+      {name:"C_Comp[B × (L/M) × C]", shape:`= [${c.B} × ${c.L_seq/c.M} × ${c.C}]`,
+       from:"softmax weighted sum (KHÔNG có matrix multiply)",
+       to:["Khối 17 (Index score)", "Khối 19 (Gather sparse KV)"]}
+    ],
+    ops: c => `// === BIẾN MỚI ===
+//   M = ${c.M} — CSA compression rate.
+
+// === MAPPING token index ===
+// Cho mỗi block-nén i ∈ {0, ..., L/M − 1} = {0, ..., ${c.L_seq/c.M-1}}:
+//   Nhánh a: {Mi, Mi+1, Mi+2, Mi+3}
+//   Nhánh b: {M(i−1), M(i−1)+1, M(i−1)+2, M(i−1)+3}  (i=0: padding)
+//
+// Ví dụ i=5: nhánh a = {20,21,22,23}; nhánh b = {16,17,18,19}.
+
+// === 3 BƯỚC per block i ===
+// (1) Slice + bias:
+//   U_a[b] = Z_a[b, Mi : Mi+M, :] + B_a         shape [B × M × C]
+//   U_b[b] = Z_b[b, M(i−1) : Mi, :] + B_b       shape [B × M × C]
+//
+// (2) Concat (2M, C) + Softmax(dim=0):
+//   U[b] = concat(U_a, U_b, dim=1)              shape [B × 2M × C]
+//   S[b] = Softmax(U[b], dim=1)                  Σ_m S[b, m, j] = 1 ∀ j
+//
+// (3) Weighted sum:
+//   X[b] = concat(C_a[b, Mi:Mi+M], C_b[b, M(i−1):Mi], dim=1)
+//   C_Comp[b, i, 0:C−1] = (S[b] ⊙ X[b]).sum(dim=1)
+
+// === Đầu ra ===
+//   C_Comp[B × L/M × C] = [${c.B} × ${c.L_seq/c.M} × ${c.C}]. Tỷ lệ nén: M = ${c.M}×.`,
+    notes:""
+  },
+
+  csa_idx_keys: {
+    title:"Khối 12-13 — CSA Indexer Keys (4 GEMM + Compression, FP4)",
+    tag:["att","Khối 12-13"],
+    desc:"Cùng pipeline như Khối 7-11 nhưng dim C_I = 128 (FP4).",
+    inputs: c => [{name:"H[B × L × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.D}]`, from:"Khối 6"}],
+    weights: c => [
+      {name:"W_aIK[D × C_I]", shape:`= [${c.D} × ${c.C_I}]`, params:c.D*c.C_I, dtype:"FP4"},
+      {name:"W_bIK[D × C_I]", shape:`= [${c.D} × ${c.C_I}]`, params:c.D*c.C_I, dtype:"FP4"},
+      {name:"W_aIZ[D × C_I]", shape:`= [${c.D} × ${c.C_I}]`, params:c.D*c.C_I, dtype:"FP4"},
+      {name:"W_bIZ[D × C_I]", shape:`= [${c.D} × ${c.C_I}]`, params:c.D*c.C_I, dtype:"FP4"},
+      {name:"B_aI[M × C_I]", shape:`= [${c.M} × ${c.C_I}]`, params:c.M*c.C_I},
+      {name:"B_bI[M × C_I]", shape:`= [${c.M} × ${c.C_I}]`, params:c.M*c.C_I}
+    ],
+    outputs: c => [
+      {name:"K_IComp[B × (L/M) × C_I]", shape:`= [${c.B} × ${c.L_seq/c.M} × ${c.C_I}]`, dtype:"FP4",
+       from:"4 matrix multiply + overlapped compression",
+       to:["Khối 17 (Index score)"]}
+    ],
+    ops: c => `// === BIẾN MỚI ===
+//   C_I = ${c.C_I} — indexer head dim (nhỏ hơn C = ${c.C}).
+
+// === Bước 1 — 4 matrix multiply (FP4) ===
+//   K_I_a = H @ W_aIK     shape [B × L × C_I]
+//   K_I_b = H @ W_bIK
+//   Z_I_a = H @ W_aIZ
+//   Z_I_b = H @ W_bIZ
+
+// === Bước 2 — Overlapped compression (giống Khối 11, thay C → C_I) ===
+// Cho mỗi i ∈ {0, ..., ${c.L_seq/c.M-1}}:
+//   K_IComp[b, i, 0:C_I−1] = (Softmax(...) ⊙ ...).sum(dim=1)`,
+    notes:"FP4: rẻ cho long context."
+  },
+
+  csa_query_lr: {
+    title:"Khối 14 — Query Down-Projection (chia sẻ Indexer & Attention)",
+    tag:["att","Khối 14"],
+    desc:"1 matrix-vector: h_l @ W_DQ → c_Q_l. CHIA SẺ giữa Khối 15 và Khối 20.",
+    inputs: c => [
+      {name:"h_l[D]", shape:`= [${c.D}]`, from:"Khối 6 (â[b, l, 0:D−1] — vector 1 token)"}
+    ],
+    weights: c => [
+      {name:"W_DQ[D × D_C]", shape:`= [${c.D} × ${c.D_C}]`, params:c.D*c.D_C, dtype:"BF16"}
+    ],
+    outputs: c => [
+      {name:"c_Q_l[D_C]", shape:`= [${c.D_C}]`, from:"h_l @ W_DQ",
+       to:["Khối 15 (Indexer queries)", "Khối 20 (Attention queries)"]}
+    ],
+    ops: c => `// === BIẾN MỚI ===
+//   D_C = ${c.D_C} — query compression dim (low-rank latent).
+
+// === PHÉP TOÁN: matrix-vector ===
+//   c_Q_l[0:D_C−1] = h_l @ W_DQ       # [D] @ [D × D_C] → [D_C]
+// TƯƠNG ĐƯƠNG Σ:
+//   c_Q_l[r] = Σ_{i=0}^{D−1} h_l[i] · W_DQ[i, r]
+//      với r ∈ {0, ..., ${c.D_C-1}}
+
+// === Cost / query token === D · D_C = ${(c.D*c.D_C/1e6).toFixed(2)} M MAC`,
+    notes:"c_Q_l CHIA SẺ — tính 1 lần dùng cho cả indexer và attention."
+  },
+
+  csa_indexer_q: {
+    title:"Khối 15-16 — Indexer Queries q_I_l + Weight w_I_l",
+    tag:["att","Khối 15-16"],
+    desc:"Khối 15: einsum 3D×vector sinh q_I_l. Khối 16: matrix-vector sinh w_I_l.",
+    inputs: c => [
+      {name:"c_Q_l[D_C]", shape:`= [${c.D_C}]`, from:"Khối 14"},
+      {name:"h_l[D]", shape:`= [${c.D}]`, from:"Khối 6"}
+    ],
+    weights: c => [
+      {name:"W_IUQ[D_C × H_I × C_I]", shape:`= [${c.D_C} × ${c.H_I} × ${c.C_I}]`,
+       params:c.D_C*c.C_I*c.H_I, dtype:"FP4"},
+      {name:"W_w[D × H_I]", shape:`= [${c.D} × ${c.H_I}]`, params:c.D*c.H_I}
+    ],
+    outputs: c => [
+      {name:"q_I_l[H_I × C_I]", shape:`= [${c.H_I} × ${c.C_I}]`, dtype:"FP4",
+       from:"einsum(c_Q_l, W_IUQ) — Khối 15", to:["Khối 17"]},
+      {name:"w_I_l[H_I]", shape:`= [${c.H_I}]`,
+       from:"h_l @ W_w — Khối 16", to:["Khối 17"]}
+    ],
+    ops: c => `// === BIẾN MỚI ===
+//   H_I = ${c.H_I} — indexer heads.
+//   C_I = ${c.C_I} — dim mỗi indexer head.
+
+// === KHỐI 15 — q_I_l (tensor 3D × vector) ===
+//   q_I_l[0:H_I−1, 0:C_I−1] = einsum("r, rhj -> hj", c_Q_l, W_IUQ)
+//
+// GIẢI THÍCH "r, rhj -> hj":
+//   c_Q_l 1 trục (r), (D_C). W_IUQ 3 trục (r, h, j), (D_C, H_I, C_I).
+//   r ở cả 2 input, không output ⇒ Σ trên r = 0..D_C−1.
+//   h, j chỉ ở Input 2 và output ⇒ giữ.
+// TƯƠNG ĐƯƠNG Σ:
+//   q_I_l[h, j] = Σ_{r=0}^{D_C−1} c_Q_l[r] · W_IUQ[r, h, j]
+//      với h ∈ {0,...,${c.H_I-1}}, j ∈ {0,...,${c.C_I-1}}
+
+// === KHỐI 16 — w_I_l (matrix-vector) ===
+//   w_I_l[0:H_I−1] = h_l @ W_w        # [D] @ [D × H_I] → [H_I]
+
+// === Cost / query token ===
+//   q_I_l: D_C · H_I · C_I = ${(c.D_C*c.C_I*c.H_I/1e6).toFixed(2)} M op (FP4)
+//   w_I_l: D · H_I         = ${(c.D*c.H_I/1e6).toFixed(3)} M MAC`,
+    notes:""
+  },
+
+  csa_index_score: {
+    title:"Khối 17-19 — Index Score + Top-K + Gather",
+    tag:["att","Khối 17-19"],
+    desc:"Khối 17: chấm điểm I[s]. Khối 18: argsort + top-K. Khối 19: gather KV.",
+    inputs: c => [
+      {name:"q_I_l[H_I × C_I]", shape:`= [${c.H_I} × ${c.C_I}]`, from:"Khối 15"},
+      {name:"K_IComp[B × (L/M) × C_I]", shape:`= [${c.B} × ${c.L_seq/c.M} × ${c.C_I}]`, from:"Khối 13"},
+      {name:"w_I_l[H_I]", shape:`= [${c.H_I}]`, from:"Khối 16"},
+      {name:"C_Comp[B × (L/M) × C]", shape:`= [${c.B} × ${c.L_seq/c.M} × ${c.C}]`, from:"Khối 11"}
+    ],
+    weights: c => [{name:"(không có weight)", shape:"-", params:0}],
+    outputs: c => [
+      {name:"I[B × S]", shape:`S = ⌊l/M⌋, tối đa [${c.B} × ${c.L_seq/c.M}]`,
+       from:"einsum + ReLU + weighted sum — Khối 17"},
+      {name:"top_blocks[B × K]", shape:`= [${c.B} × ${c.K_topk}]`, dtype:"int",
+       from:"argsort_descending(I)[0:K−1] — Khối 18"},
+      {name:"C_SprsComp_l[B × K × C]", shape:`= [${c.B} × ${c.K_topk} × ${c.C}]`,
+       from:"gather C_Comp theo top_blocks — Khối 19",
+       to:["Khối 24 (concat với KV_win)"]}
+    ],
+    ops: c => `// === BIẾN MỚI ===
+//   K = ${c.K_topk} — số block-nén giữ lại.
+//   S = ⌊l/M⌋ — số block ứng viên causal.
+
+// === KHỐI 17 — Chấm điểm ===
+//   dot[b, h, s]      = q_I_l[h, :] · K_IComp[b, s, :]      # dot product theo j
+//   per_head[b, h, s] = ReLU(dot[b, h, s])
+//   I[b, s]           = einsum("h, hs -> s", w_I_l[b], per_head[b])
+
+// === KHỐI 18 — Top-K ===
+//   top_blocks[b, 0:K−1] = argsort_descending(I[b, 0:S−1])[0:K−1]
+//      ⇒ top_blocks[b, u] ∈ {0, ..., S−1} với u ∈ {0, ..., ${c.K_topk-1}}
+
+// === KHỐI 19 — Gather ===
+//   C_SprsComp_l[b, u, 0:C−1] = C_Comp(b, top_blocks[b, u], 0:C−1)
+//      với u ∈ {0, ..., ${c.K_topk-1}}
+
+// === Ví dụ ===
+// Giả sử S = ${c.L_seq/c.M}, top_blocks[0] = [487, 12, 901, ..., 33] (${c.K_topk} indices, giảm dần):
+//   C_SprsComp_l[0, 0, :] = C_Comp[0, 487, :]
+//   C_SprsComp_l[0, 1, :] = C_Comp[0,  12, :]
+//   ...
+//   C_SprsComp_l[0, ${c.K_topk-1}, :] = C_Comp[0, 33, :]`,
+    notes:""
+  },
+
+  csa_query_up: {
+    title:"Khối 20-22 — Attention Queries: Up-Projection + RMSNorm + Partial RoPE",
+    tag:["att","Khối 20-22"],
+    desc:"Khối 20: einsum sinh q_l. Khối 21: RMSNorm per head. Khối 22: Partial RoPE(+l) 64 dim cuối.",
+    inputs: c => [{name:"c_Q_l[D_C]", shape:`= [${c.D_C}]`, from:"Khối 14"}],
+    weights: c => [
+      {name:"W_UQ[D_C × H × C]", shape:`= [${c.D_C} × ${c.H} × ${c.C}]`,
+       params:c.D_C*c.C*c.H, dtype:"BF16"},
+      {name:"γ_q[H × C]", shape:`= [${c.H} × ${c.C}]`, params:c.H*c.C}
+    ],
+    outputs: c => [
+      {name:"q_l[H × C]", shape:`= [${c.H} × ${c.C}]`,
+       from:"einsum(c_Q_l, W_UQ) → RMSNorm → RoPE(+l)",
+       to:["Khối 25 (Core MQA logits)"]}
+    ],
+    ops: c => `// === BIẾN MỚI ===
+//   H = ${c.H} — số attention head.
+
+// === KHỐI 20 — Up-projection ===
+//   q_l[0:H−1, 0:C−1] = einsum("r, rhi -> hi", c_Q_l, W_UQ)
+// TƯƠNG ĐƯƠNG Σ:
+//   q_l[h, i] = Σ_{r=0}^{D_C−1} c_Q_l[r] · W_UQ[r, h, i]
+//      với h ∈ {0,...,${c.H-1}}, i ∈ {0,...,${c.C-1}}
+
+// === KHỐI 21 — RMSNorm per head ===
+//   ms_q[h] = (1/C) · Σ_{i=0}^{C−1} q_l[h, i]²
+//   q_l[h, i] = γ_q[h, i] · q_l[h, i] / sqrt(ms_q[h] + ε)
+
+// === KHỐI 22 — Partial RoPE 64 dim cuối (position = +l) ===
+// Cho mỗi cặp (i, i+1) ∈ {C−64, C−62, ..., C−2} = {${c.C-64}, ..., ${c.C-2}}:
+//   p = (i − (C−64)) ÷ 2   ∈ {0, ..., 31}
+//   ω = 10000^(-2p/64)
+//   θ = l · ω
+//   (q_l[h, i], q_l[h, i+1]) ← (q·cosθ − q'·sinθ, q·sinθ + q'·cosθ)
+
+// === Cost / query token === D_C · H · C = ${(c.D_C*c.C*c.H/1e6).toFixed(2)} M MAC`,
+    notes:""
+  },
+
+  csa_swa_branch: {
+    title:"Khối 23 — Sliding Window KV (W = 128 token gần nhất)",
+    tag:["att","Khối 23"],
+    desc:"Nhánh phụ KV KHÔNG nén, W = 128 token gần nhất.",
+    inputs: c => [
+      {name:"H_recent[B × W × D]", shape:`= [${c.B} × ${c.W_win} × ${c.D}]`,
+       from:"slice H[b, l−W : l, :] từ Khối 6"}
+    ],
+    weights: c => [
+      {name:"W_KV_win[D × C]", shape:`= [${c.D} × ${c.C}]`, params:c.D*c.C, dtype:"BF16"}
+    ],
+    outputs: c => [
+      {name:"KV_win[B × W × C]", shape:`= [${c.B} × ${c.W_win} × ${c.C}]`,
+       from:"H_recent @ W_KV_win + RMSNorm + Partial RoPE",
+       to:["Khối 24 (concat với C_SprsComp_l)"]}
+    ],
+    ops: c => `// === BIẾN MỚI ===
+//   W = ${c.W_win} — sliding window size.
+
+// === PHÉP TOÁN ===
+//   H_recent[b, 0:W−1, 0:D−1] = H[b, max(0, l−W) : l, 0:D−1]
+//   KV_win[b, 0:W−1, 0:C−1]   = H_recent @ W_KV_win        # [B × W × C]
+//   KV_win[b, w, :] = γ_kv ⊙ KV_win[b, w, :] / rms         # RMSNorm per row
+//   KV_win[b, w, C−64:C] ← RoPE_pair(..., position = l−W+w)
+
+// === Cache vòng ===
+// Ring buffer ${c.W_win} entry; mỗi step decode chỉ thêm 1 token mới.
+// Cost project 1 token: D · C = ${(c.D*c.C/1e6).toFixed(2)} M MAC.`,
+    notes:"Giữ local fine-grained dependencies."
+  },
+
+  csa_core_attn: {
+    title:"Khối 24-28 — Core MQA (Concat + Logits + Softmax+Sink + Weighted Sum + RoPE−l)",
+    tag:["att","Khối 24-28"],
+    desc:"5 khối: concat KV, q@KV.T scaled, Softmax với sink, scores@KV, RoPE(−l).",
+    inputs: c => [
+      {name:"q_l[B × H × C]", shape:`= [${c.B} × ${c.H} × ${c.C}]`, from:"Khối 22"},
+      {name:"C_SprsComp_l[B × K × C]", shape:`= [${c.B} × ${c.K_topk} × ${c.C}]`, from:"Khối 19"},
+      {name:"KV_win[B × W × C]", shape:`= [${c.B} × ${c.W_win} × ${c.C}]`, from:"Khối 23"}
+    ],
+    weights: c => [{name:"z'[H] (sink)", shape:`= [${c.H}]`, params:c.H}],
+    outputs: c => [
+      {name:"o_l[B × H × C]", shape:`= [${c.B} × ${c.H} × ${c.C}]`,
+       from:"scores @ KV + RoPE(−l)",
+       to:["Khối 29 (view + per-group projection)"]}
+    ],
+    ops: c => `// === KHỐI 24 — Concat KV ===
+//   KV[b, 0:J−1, 0:C−1] = concat(C_SprsComp_l[b], KV_win[b], dim=0)
+//   J = K + W = ${c.K_topk} + ${c.W_win} = ${c.K_topk+c.W_win}
+
+// === KHỐI 25 — Attention logits ===
+//   logits[b, 0:H−1, 0:J−1] = (q_l[b] @ KV[b].T) / sqrt(C)
+// TƯƠNG ĐƯƠNG Σ:
+//   logits[b, h, j] = (1/sqrt(C)) · Σ_{i=0}^{C−1} q_l[b, h, i] · KV[b, j, i]
+
+// === KHỐI 26 — Softmax với Attention Sink ===
+//   logits_sink[b, h, 0:J] = concat(logits[b, h, :], z'[h], dim=0)
+//   probs[b, h, 0:J]       = Softmax(logits_sink[b, h, :], dim=0)
+//   scores[b, h, 0:J−1]    = probs[b, h, 0:J−1]      # bỏ phần tử sink
+//   ⇒ Σ_j scores[b, h, j] ≤ 1 (sink "hút" 1 phần xác suất)
+
+// === KHỐI 27 — Weighted sum ===
+//   o_l[b, 0:H−1, 0:C−1] = scores[b] @ KV[b]         # [B × H × C]
+// TƯƠNG ĐƯƠNG Σ:
+//   o_l[b, h, c] = Σ_{j=0}^{J−1} scores[b, h, j] · KV[b, j, c]
+
+// === KHỐI 28 — RoPE(−l) 64 dim cuối ===
+//   θ = −l · 10000^(-2p/64)      # position ÂM
+//   (o_l[h, i], o_l[h, i+1]) ← RoPE_pair(..., θ)
+
+// === Cost / query token ===
+//   H · J · C = ${c.H} · ${c.K_topk+c.W_win} · ${c.C} = ${(c.H*(c.K_topk+c.W_win)*c.C/1e6).toFixed(2)} M MAC`,
+    notes:"Số KV = K + W (Flash: 640; Pro: 1152)"
+  },
+
+  csa_group_proj: {
+    title:"Khối 29-30 — Grouped Output Projection (view multi-head + einsum × 2)",
+    tag:["att","Khối 29-30"],
+    desc:"TÁCH H heads thành G group qua view (0 MAC) + 2 einsum: per-group + final.",
+    inputs: c => [
+      {name:"o_l[B × L × H × C]", shape:`= [${c.B} × ${c.L_seq} × ${c.H} × ${c.C}]`, from:"Khối 28"}
+    ],
+    weights: c => [
+      {name:"W_OG[G × H/G × C × D_G]", shape:`= [${c.G} × ${c.H/c.G} × ${c.C} × ${c.D_G}]`,
+       params:c.G*(c.C*c.H/c.G)*c.D_G, dtype:"BF16"},
+      {name:"W_O[G × D_G × D]", shape:`= [${c.G} × ${c.D_G} × ${c.D}]`,
+       params:c.G*c.D_G*c.D, dtype:"BF16"}
+    ],
+    outputs: c => [
+      {name:"out_att[B × L × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.D}]`,
+       from:"2 einsum (per-group + final)",
+       to:["Khối 35 (Residual update sau attn)"]}
+    ],
+    ops: c => `// === BIẾN MỚI ===
+//   G = ${c.G} — số output group, mỗi group có H/G = ${c.H/c.G} head.
+//   D_G = ${c.D_G} — intermediate dim per group.
+
+// === BƯỚC 0 — TÁCH multi-head bằng view (0 MAC) ===
+//   o_l_3d = o_l.view(B, L, G, H/G, C) = view(${c.B}, ${c.L_seq}, ${c.G}, ${c.H/c.G}, ${c.C})
+//
+// CÁCH ĐỌC view: trục H = ${c.H} tách thành (G, H/G) = (${c.G}, ${c.H/c.G}).
+// Head toàn cục h = γ · (H/G) + h_local.
+//   Ví dụ: o_l[..,0,c] ↔ o_l_3d[..,0,0,c]  (head 0 = group 0, local 0)
+//          o_l[..,${c.H/c.G},c] ↔ o_l_3d[..,1,0,c]  (chuyển sang group 1)
+//          o_l[..,${c.H-1},c] ↔ o_l_3d[..,${c.G-1},${c.H/c.G-1},c]  (head cuối)
+
+// === KHỐI 29 — Per-group projection ===
+//   o_G'[b, l, 0:G−1, 0:D_G−1] = einsum("ghi, ghir -> gr", o_l_3d[b, l], W_OG)
+//
+// GIẢI THÍCH "ghi, ghir -> gr":
+//   o_l_3d[b, l] có 3 trục (g, h, i), (G, H/G, C).
+//   W_OG có 4 trục (g, h, i, r), (G, H/G, C, D_G).
+//   Output (g, r), (G, D_G).
+//   - g ở cả 2 input và output ⇒ GIỮ (mỗi group trộn RIÊNG weight của nó).
+//   - h, i ở input nhưng không output ⇒ Σ trên h, i.
+//   - r chỉ ở Input 2 và output ⇒ giữ.
+// TƯƠNG ĐƯƠNG Σ:
+//   o_G'[b, l, γ, r] = Σ_{h_local=0}^{${c.H/c.G-1}} Σ_{i=0}^{${c.C-1}} o_l_3d[..γ,h_local,i] · W_OG[γ,h_local,i,r]
+
+// === KHỐI 30 — Final projection ===
+//   out_att[b, l, 0:D−1] = einsum("gr, gri -> i", o_G'[b, l], W_O)
+
+// === Cost / query token ===
+//   Khối 29: G · (H/G) · C · D_G = ${(c.G*c.C*c.H/c.G*c.D_G/1e6).toFixed(2)} M MAC
+//   Khối 30: G · D_G · D         = ${(c.G*c.D_G*c.D/1e6).toFixed(2)} M MAC`,
+    notes:"Giảm cost so với projection trực tiếp (C·H, D)."
+  },
+
+  hca_kv_proj: {
+    title:"Khối 7H-8H — HCA: KV projection (chỉ 1 nhánh)",
+    tag:["att","Khối 7H-8H"],
+    desc:"Khác CSA: HCA chỉ 1 nhánh KV. 2 matrix multiply riêng.",
+    inputs: c => [{name:"H[B × L × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.D}]`, from:"Khối 6"}],
+    weights: c => [
+      {name:"W_KV[D × C]", shape:`= [${c.D} × ${c.C}]`, params:c.D*c.C, dtype:"BF16"},
+      {name:"W_Z[D × C]",  shape:`= [${c.D} × ${c.C}]`, params:c.D*c.C, dtype:"BF16"}
+    ],
+    outputs: c => [
+      {name:"C[B × L × C]", shape:`= [${c.B} × ${c.L_seq} × ${c.C}]`, from:"H @ W_KV", to:["Khối 9H"]},
+      {name:"Z[B × L × C]", shape:`= [${c.B} × ${c.L_seq} × ${c.C}]`, from:"H @ W_Z", to:["Khối 9H"]}
+    ],
+    ops: c => `// === PHÉP TOÁN ===
+//   C = H @ W_KV         shape [B × L × C]
+//   Z = H @ W_Z          shape [B × L × C]
+// TƯƠNG ĐƯƠNG Σ:
+//   C[b, l, j] = Σ_{i=0}^{D−1} H[b, l, i] · W_KV[i, j]
+//   Z[b, l, j] = Σ_{i=0}^{D−1} H[b, l, i] · W_Z[i, j]
+
+// === Cost / sequence ===
+//   2 · B · L · D · C = ${(2*c.B*c.L_seq*c.D*c.C/1e9).toFixed(2)} G MAC (= 1/2 CSA).`,
+    notes:""
+  },
+
+  hca_compress: {
+    title:"Khối 9H — HCA Heavy Compression (M' = 128, KHÔNG overlapping)",
+    tag:["att","Khối 9H"],
+    desc:"Mỗi M' = 128 KV entry liên tiếp nén thành 1 entry.",
+    inputs: c => [
+      {name:"C[B × L × C]", shape:`= [${c.B} × ${c.L_seq} × ${c.C}]`, from:"Khối 7H"},
+      {name:"Z[B × L × C]", shape:`= [${c.B} × ${c.L_seq} × ${c.C}]`, from:"Khối 8H"}
+    ],
+    weights: c => [
+      {name:"B[M' × C]", shape:`= [${c.M_p} × ${c.C}]`, params:c.M_p*c.C, desc:"Positional bias."}
+    ],
+    outputs: c => [
+      {name:"C_Comp[B × (L/M') × C]", shape:`= [${c.B} × ${c.L_seq/c.M_p} × ${c.C}]`,
+       from:"softmax weighted sum",
+       to:["Khối 15H (concat với KV_win)"]}
+    ],
+    ops: c => `// === BIẾN MỚI ===
+//   M' = ${c.M_p} — HCA compression rate.
+
+// === PHÉP TOÁN ===
+// Cho mỗi block-nén i ∈ {0, ..., L/M' − 1} = {0, ..., ${c.L_seq/c.M_p-1}}:
+//   U_i[b, 0:M'−1, 0:C−1] = Z[b, M'i : M'(i+1), :] + B[0:M'−1, :]
+//   S_i[b] = Softmax(U_i[b], dim=1)
+//   X_i[b] = C[b, M'i : M'(i+1), :]
+//   C_Comp[b, i, 0:C−1] = (S_i[b] ⊙ X_i[b]).sum(dim=1)
+
+// === Đầu ra ===
+//   C_Comp[B × L/M' × C] = [${c.B} × ${c.L_seq/c.M_p} × ${c.C}]
+//   L = ${c.L_seq} → ${c.L_seq/c.M_p} entries; L = 1M → ~${Math.round(1e6/c.M_p)} entries.`,
+    notes:""
+  },
+
+  hca_query_lr: {
+    title:"Khối 10H-13H — HCA Query: Down + Up + RMSNorm + RoPE",
+    tag:["att","Khối 10H-13H"],
+    desc:"Giống CSA Khối 14, 20-22 nhưng KHÔNG chia sẻ latent (HCA không có indexer).",
+    inputs: c => [{name:"h_l[D]", shape:`= [${c.D}]`, from:"Khối 6"}],
+    weights: c => [
+      {name:"W_DQ[D × D_C]", shape:`= [${c.D} × ${c.D_C}]`, params:c.D*c.D_C, dtype:"BF16"},
+      {name:"W_UQ[D_C × H × C]", shape:`= [${c.D_C} × ${c.H} × ${c.C}]`, params:c.D_C*c.C*c.H, dtype:"BF16"},
+      {name:"γ_q[H × C]", shape:`= [${c.H} × ${c.C}]`, params:c.H*c.C}
+    ],
+    outputs: c => [
+      {name:"q_l[H × C]", shape:`= [${c.H} × ${c.C}]`,
+       from:"h_l → c_Q_l → q_l → RMSNorm → RoPE(+l)",
+       to:["Khối 16H (Core MQA logits)"]}
+    ],
+    ops: c => `// === KHỐI 10H — Down ===
+//   c_Q_l = h_l @ W_DQ                   # [D] @ [D × D_C] → [D_C]
+
+// === KHỐI 11H — Up ===
+//   q_l = einsum("r, rhi -> hi", c_Q_l, W_UQ)     # [H × C]
+
+// === KHỐI 12H — RMSNorm per head ===
+//   q_l[h, i] = γ_q[h, i] · q_l[h, i] / sqrt(mean(q_l[h, :]²) + ε)
+
+// === KHỐI 13H — Partial RoPE +l 64 dim cuối (giống Khối 22) ===
+
+// === Cost / query token ===
+//   ${(c.D*c.D_C/1e6).toFixed(2)} M (W_DQ) + ${(c.D_C*c.C*c.H/1e6).toFixed(2)} M (W_UQ) = ${((c.D*c.D_C+c.D_C*c.C*c.H)/1e6).toFixed(2)} M MAC`,
+    notes:"HCA KHÔNG có Lightning Indexer (W_IUQ, W_w)."
+  },
+
+  hca_core_attn: {
+    title:"Khối 15H-18H — HCA Core MQA (giống Khối 24-28 CSA)",
+    tag:["att","Khối 15H-18H"],
+    desc:"KV rất nhỏ: L/M' + W entries.",
+    inputs: c => [
+      {name:"q_l[B × H × C]", shape:`= [${c.B} × ${c.H} × ${c.C}]`, from:"Khối 13H"},
+      {name:"C_Comp[B × (L/M') × C]", shape:`= [${c.B} × ${c.L_seq/c.M_p} × ${c.C}]`, from:"Khối 9H"},
+      {name:"KV_win[B × W × C]", shape:`= [${c.B} × ${c.W_win} × ${c.C}]`, from:"Khối 14H"}
+    ],
+    weights: c => [{name:"z'[H] (sink)", shape:`= [${c.H}]`, params:c.H}],
+    outputs: c => [
+      {name:"o_l[B × H × C]", shape:`= [${c.B} × ${c.H} × ${c.C}]`,
+       from:"scores @ KV + RoPE(−l)", to:["Khối 19H"]}
+    ],
+    ops: c => `// KV = concat(C_Comp, KV_win, dim=0)   shape [B × J × C]
+// J = L/M' + W = ${c.L_seq/c.M_p} + ${c.W_win} = ${c.L_seq/c.M_p+c.W_win}
+//
+// logits = (q_l @ KV.T) / sqrt(C)     # [B × H × J]
+// Softmax với Attention Sink (như Khối 26)
+// o_l = scores @ KV                    # [B × H × C]
+// RoPE(−l) 64 dim cuối
+//
+// Cost = H · J · C = ${c.H} · ${c.L_seq/c.M_p+c.W_win} · ${c.C} = ${(c.H*(c.L_seq/c.M_p+c.W_win)*c.C/1e6).toFixed(2)} M MAC
+// → ~ ${((c.K_topk+c.W_win)/(c.L_seq/c.M_p+c.W_win)).toFixed(0)}× ít hơn CSA.`,
+    notes:""
+  },
+
+  hca_group_proj: {
+    title:"Khối 19H — HCA Grouped Output Projection (giống Khối 29-30)",
+    tag:["att","Khối 19H"],
+    desc:"Cấu trúc giống Khối 29-30 CSA.",
+    inputs: c => [{name:"o_l[B × L × H × C]", shape:`= [${c.B} × ${c.L_seq} × ${c.H} × ${c.C}]`, from:"Khối 18H"}],
+    weights: c => [
+      {name:"W_OG[G × H/G × C × D_G]", shape:`= [${c.G} × ${c.H/c.G} × ${c.C} × ${c.D_G}]`,
+       params:c.G*(c.C*c.H/c.G)*c.D_G},
+      {name:"W_O[G × D_G × D]", shape:`= [${c.G} × ${c.D_G} × ${c.D}]`, params:c.G*c.D_G*c.D}
+    ],
+    outputs: c => [
+      {name:"out_att[B × L × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.D}]`,
+       from:"2 einsum", to:["Khối 35"]}
+    ],
+    ops: c => `// Xem chi tiết Khối 29-30 (CSA group_proj).
+// Bước 0: o_l_3d = o_l.view(B, L, G, H/G, C)
+// Bước 1: o_G' = einsum("ghi, ghir -> gr", o_l_3d, W_OG)   # [B × L × G × D_G]
+// Bước 2: out_att = einsum("gr, gri -> i", o_G', W_O)       # [B × L × D]
+//
+// Cost: ${(c.G*c.C*c.H/c.G*c.D_G/1e6).toFixed(2)} M + ${(c.G*c.D_G*c.D/1e6).toFixed(2)} M MAC / token`,
+    notes:""
+  },
+
+  moe_router: {
+    title:"Khối 40 — MoE Router (Sqrt(Softplus(·)) + argsort + Softmax)",
+    tag:["moe","Khối 40"],
+    desc:"V4 thay Sigmoid (V3) bằng Sqrt(Softplus(·)). 3 layer MoE đầu dùng Hash routing.",
+    inputs: c => [{name:"h[D]", shape:`= [${c.D}]`, from:"Khối 39 (b̂)"}],
+    weights: c => [
+      {name:"W_router[D × E]", shape:`= [${c.D} × ${c.E}]`, params:c.D*c.E, dtype:"BF16"},
+      {name:"b[E] (bias)", shape:`= [${c.E}]`, params:c.E}
+    ],
+    outputs: c => [
+      {name:"g̃[E]", shape:`= [${c.E}]`, from:"sqrt(softplus(h @ W_router + b))"},
+      {name:"top_idx[E_act]", shape:`= [${c.E_act}]`, dtype:"int",
+       from:"argsort_descending(g̃)[0:E_act−1]", to:["Khối 42"]},
+      {name:"w_top[E_act]", shape:`= [${c.E_act}]`, from:"Softmax(g̃(top_idx))", to:["Khối 43"]}
+    ],
+    ops: c => `// === BIẾN MỚI ===
+//   E = ${c.E}     — routed experts.
+//   E_act = ${c.E_act} — activated experts / token.
+
+// === Bước 1 — Raw affinity ===
+//   g_raw = h @ W_router + b        # [D] @ [D × E] + [E] → [E]
+
+// === Bước 2 — V4 activation ===
+//   g̃[e] = sqrt(log(1 + exp(g_raw[e])))     ∈ ℝ_{≥0}
+
+// === Bước 3 — Top-k ===
+//   top_idx[0:E_act−1] = argsort_descending(g̃)[0:E_act−1]
+
+// === Bước 4 — Softmax normalize ===
+//   w_top = Softmax(g̃(top_idx))     Σ w_top = 1
+
+// === Ví dụ ===
+// Giả sử g̃(top_idx) = [3.20, 2.80, 2.50, 2.10, 1.80, 1.50],
+//        top_idx = [47, 183, 2, 209, 91, 134].
+// Sau Softmax: w_top ≈ [0.341, 0.229, 0.169, 0.114, 0.084, 0.062].
+
+// === Cost === D · E = ${(c.D*c.E/1e6).toFixed(2)} M MAC + 1 argsort`,
+    notes:""
+  },
+
+  moe_shared: {
+    title:"Khối 41 — Shared Expert (SwiGLU FFN, luôn kích hoạt)",
+    tag:["moe","Khối 41"],
+    desc:"1 SwiGLU FFN luôn tính cho MỌI token.",
+    inputs: c => [{name:"h[D]", shape:`= [${c.D}]`, from:"Khối 39"}],
+    weights: c => [
+      {name:"W_gate[D × D_FF]", shape:`= [${c.D} × ${c.D_FF}]`, params:c.D*c.D_FF, dtype:"BF16"},
+      {name:"W_up[D × D_FF]",   shape:`= [${c.D} × ${c.D_FF}]`, params:c.D*c.D_FF, dtype:"BF16"},
+      {name:"W_down[D_FF × D]", shape:`= [${c.D_FF} × ${c.D}]`, params:c.D_FF*c.D, dtype:"BF16"}
+    ],
+    outputs: c => [
+      {name:"y_shared[D]", shape:`= [${c.D}]`,
+       from:"SwiGLU FFN (clamped)", to:["Khối 44"]}
+    ],
+    ops: c => `// === BIẾN MỚI ===
+//   D_FF = ${c.D_FF} — expert intermediate dim.
+
+// === 4 BƯỚC ===
+// (1) Hai projection:
+//     gate = h @ W_gate                # [D] @ [D × D_FF] → [D_FF]
+//     up   = h @ W_up
+// (2) SwiGLU clamping (element-wise):
+//     gate = min(gate, 10)
+//     up   = clamp(up, -10, 10)
+// (3) SwiGLU activation:
+//     inter = SiLU(gate) ⊙ up          # SiLU(x) = x · sigmoid(x)
+// (4) Down projection:
+//     y_shared = inter @ W_down        # [D_FF] @ [D_FF × D] → [D]
+
+// === Cost / token === 3·D·D_FF = ${(3*c.D*c.D_FF/1e6).toFixed(2)} M MAC`,
+    notes:"SwiGLU clamping chống outlier."
+  },
+
+  moe_routed: {
+    title:"Khối 42-43 — Routed Experts (E_act SwiGLU song song + weighted sum)",
+    tag:["moe","Khối 42-43"],
+    desc:"CHỈ E_act = 6 trong E expert được tính cho mỗi token.",
+    inputs: c => [
+      {name:"h[D]", shape:`= [${c.D}]`, from:"Khối 39"},
+      {name:"top_idx[E_act]", shape:`= [${c.E_act}]`, dtype:"int", from:"Khối 40"},
+      {name:"w_top[E_act]", shape:`= [${c.E_act}]`, from:"Khối 40"}
+    ],
+    weights: c => [
+      {name:"W_gate[E × D × D_FF]", shape:`= [${c.E} × ${c.D} × ${c.D_FF}]`,
+       params:c.E*c.D*c.D_FF, dtype:"BF16"},
+      {name:"W_up[E × D × D_FF]",   shape:`= [${c.E} × ${c.D} × ${c.D_FF}]`, params:c.E*c.D*c.D_FF, dtype:"BF16"},
+      {name:"W_down[E × D_FF × D]", shape:`= [${c.E} × ${c.D_FF} × ${c.D}]`, params:c.E*c.D_FF*c.D, dtype:"BF16"}
+    ],
+    outputs: c => [
+      {name:"y_routed[E_act × D]", shape:`= [${c.E_act} × ${c.D}]`,
+       from:"E_act SwiGLU song song — Khối 42"},
+      {name:"y_routed_sum[D]", shape:`= [${c.D}]`,
+       from:"einsum(w_top, y_routed) — Khối 43", to:["Khối 44"]}
+    ],
+    ops: c => `// === KHỐI 42 — E_act SwiGLU song song ===
+// Cho mỗi r ∈ {0, 1, ..., ${c.E_act-1}}:
+//   e = top_idx[r]                         # ∈ {0, ..., ${c.E-1}}
+//   gate = min(h @ W_gate(e, :, :), 10)
+//   up   = clamp(h @ W_up(e, :, :), -10, 10)
+//   inter = SiLU(gate) ⊙ up
+//   y_routed[r, :] = inter @ W_down(e, :, :)
+
+// === KHỐI 43 — Weighted sum theo gating ===
+//   y_routed_sum[0:D−1] = einsum("r, ri -> i", w_top, y_routed)
+//
+// GIẢI THÍCH "r, ri -> i":
+//   w_top 1 trục (r), (E_act). y_routed 2 trục (r, i), (E_act, D).
+//   r ở cả 2 input, không output ⇒ Σ trên r = 0..${c.E_act-1}.
+//   i chỉ ở Input 2 và output ⇒ giữ.
+// TƯƠNG ĐƯƠNG Σ:
+//   y_routed_sum[i] = Σ_{r=0}^{E_act−1} w_top[r] · y_routed[r, i]
+
+// === Ví dụ ===
+//   w_top = [0.30, 0.20, 0.15, 0.13, 0.12, 0.10]
+//   y_routed_sum[i] = 0.30·y_routed[0,i] + 0.20·y_routed[1,i] + ...
+
+// === Cost / token ===
+//   E_act · 3 · D · D_FF = ${(c.E_act*3*c.D*c.D_FF/1e6).toFixed(2)} M MAC
+// Params (lưu trữ): E · 3 · D · D_FF = ${(c.E*3*c.D*c.D_FF/1e9).toFixed(2)} G`,
+    notes:""
+  },
+
+  moe_combine: {
+    title:"Khối 44 — Combine (element-wise sum)",
+    tag:["moe","Khối 44"],
+    desc:"y_shared + y_routed_sum element-wise.",
+    inputs: c => [
+      {name:"y_shared[D]", shape:`= [${c.D}]`, from:"Khối 41"},
+      {name:"y_routed_sum[D]", shape:`= [${c.D}]`, from:"Khối 43"}
+    ],
+    weights: c => [{name:"(không có weight)", shape:"-", params:0}],
+    outputs: c => [
+      {name:"out_moe[D]", shape:`= [${c.D}]`,
+       from:"y_shared + y_routed_sum", to:["Khối 49 (Residual update sau MoE)"]}
+    ],
+    ops: c => `// === PHÉP TOÁN (element-wise) ===
+//   out_moe[i] = y_shared[i] + y_routed_sum[i]
+//      với i ∈ {0, ..., ${c.D-1}}
+// Cost: ${c.D} cộng (không đáng kể).`,
+    notes:""
+  },
+
+  moe_hash: {
+    title:"Khối 40-Hash — Hash Routing (3 layer MoE đầu)",
+    tag:["moe","Khối 40-Hash"],
+    desc:"Thay thế Khối 40 cho 3 layer MoE đầu. Deterministic theo token_id, không học.",
+    inputs: c => [{name:"token_ids[b, l]", shape:"scalar int", from:"Khối 0 (giữ qua các layer)"}],
+    weights: c => [
+      {name:"HashTable[E × E_act]", shape:`= [${c.E} × ${c.E_act}]`, params:0, dtype:"int (fixed)"}
+    ],
+    outputs: c => [
+      {name:"top_idx[E_act]", shape:`= [${c.E_act}]`, dtype:"int",
+       from:"HashTable(bucket, 0:E_act−1)", to:["Khối 42"]},
+      {name:"w_top[E_act]", shape:`= [${c.E_act}]`, from:"uniform [1/E_act, ...]", to:["Khối 43"]}
+    ],
+    ops: c => `// (1) bucket = token_ids[b, l] mod E     ∈ {0, ..., ${c.E-1}}
+// (2) top_idx = HashTable(bucket, 0:E_act−1)
+// (3) w_top = [1/${c.E_act}, ..., 1/${c.E_act}]
+
+// Ví dụ: token_id = 7 → bucket = 7 → top_idx = [e₀,...,e₅] cố định.`,
+    notes:"Ổn định khi embedding chưa giàu thông tin."
+  },
+
+  moe_one_expert: {
+    title:"Một Routed Expert E_e (SwiGLU FFN)",
+    tag:["moe","Expert e"],
+    desc:"Mỗi expert e ∈ {0, ..., E−1} là 1 SwiGLU FFN độc lập.",
+    inputs: c => [{name:"h[D]", shape:`= [${c.D}]`, from:"Khối 39"}],
+    weights: c => [
+      {name:"W_gate[D × D_FF]", shape:`= [${c.D} × ${c.D_FF}]`, params:c.D*c.D_FF, dtype:"BF16"},
+      {name:"W_up[D × D_FF]",   shape:`= [${c.D} × ${c.D_FF}]`, params:c.D*c.D_FF, dtype:"BF16"},
+      {name:"W_down[D_FF × D]", shape:`= [${c.D_FF} × ${c.D}]`, params:c.D_FF*c.D, dtype:"BF16"}
+    ],
+    outputs: c => [
+      {name:"y_expert[D]", shape:`= [${c.D}]`,
+       from:"SwiGLU FFN clamped", to:["Khối 43 (weighted sum)"]}
+    ],
+    ops: c => `// Xem chi tiết Khối 41 (moe_shared).
+// gate = min(h @ W_gate, 10)
+// up   = clamp(h @ W_up, -10, 10)
+// inter = SiLU(gate) ⊙ up
+// y_expert = inter @ W_down
+
+// Cost / expert: 3·D·D_FF = ${(3*c.D*c.D_FF/1e6).toFixed(2)} M MAC
+// Params/expert: ${(3*c.D*c.D_FF/1e6).toFixed(2)} M`,
+    notes:"E = 256 (Flash) / 384 (Pro) routed experts; E_act = 6 activated / token."
+  },
+
+  final_norm: {
+    title:"Khối 50-52 — Final Mix + RMSNorm + LM Head",
+    tag:["emb","Khối 50-52"],
+    desc:"Khối 50: mix A_final · X_L. Khối 51: RMSNorm. Khối 52: LM head @ W_lm.",
+    inputs: c => [
+      {name:"X_L[B × L × N × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.N} × ${c.D}]`,
+       from:`Block ${c.L_block} (Khối 49 cuối)`},
+      {name:"A_final[N]", shape:`= [${c.N}]`, from:"mHC ở layer cuối"}
+    ],
+    weights: c => [
+      {name:"γ_final[D]", shape:`= [${c.D}]`, params:c.D, dtype:"BF16"},
+      {name:"W_lm[D × V]", shape:`= [${c.D} × ${c.V}]`, params:c.D*c.V, dtype:"BF16"}
+    ],
+    outputs: c => [
+      {name:"logits[B × L × V]", shape:`= [${c.B} × ${c.L_seq} × ${c.V}]`,
+       bytes:c.B*c.L_seq*c.V*2,
+       from:"einsum(A_final, X_L) → RMSNorm → @ W_lm",
+       to:["Loss / sampling"]}
+    ],
+    ops: c => `// === KHỐI 50 — Lấy hidden state thật từ residual mở rộng ===
+//   h_final[b, l, 0:D−1] = einsum("k, ki -> i", A_final, X_L[b, l])   # [B × L × D]
+
+// === KHỐI 51 — RMSNorm per token ===
+//   ms[b, l]        = (1/D) · Σ_{i=0}^{D−1} h_final[b, l, i]²
+//   h_norm[b, l, i] = γ_final[i] · h_final[b, l, i] / sqrt(ms[b, l] + ε)
+
+// === KHỐI 52 — LM head (matrix multiply) ===
+//   logits[b, l, 0:V−1] = h_norm[b, l] @ W_lm        # [D] @ [D × V] → [V]
+// TƯƠNG ĐƯƠNG Σ:
+//   logits[b, l, v] = Σ_{i=0}^{D−1} h_norm[b, l, i] · W_lm[i, v]
+//      với v ∈ {0, ..., ${c.V-1}}
+
+// === Cost / token (LM head) === D · V = ${(c.D*c.V/1e6).toFixed(1)} M MAC`,
+    notes:"Có thể tied với W_emb."
+  },
+
+  mtp: {
+    title:"Khối 53-54 — MTP Module (depth = 1)",
+    tag:["mtp","Khối 53-54"],
+    desc:"Khối 53: 1 Transformer block phụ. Khối 54: LM head chia sẻ. Dự đoán token l+2.",
+    inputs: c => [
+      {name:"h_main[B × L × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.D}]`, from:"Khối 50"},
+      {name:"embed_next[B × L × D]", shape:`= [${c.B} × ${c.L_seq} × ${c.D}]`,
+       from:"Khối 1 với token_ids[b, l+1]"}
+    ],
+    weights: c => [
+      {name:"W block MTP phụ", shape:"~ như block chính", params:0},
+      {name:"W_lm (chia sẻ)", shape:`= [${c.D} × ${c.V}]`, params:0}
+    ],
+    outputs: c => [
+      {name:"logits_MTP[B × L × V]", shape:`= [${c.B} × ${c.L_seq} × ${c.V}]`,
+       from:"MTP_block(h_main, embed_next) @ W_lm",
+       to:["MTP loss / Speculative decoding"]}
+    ],
+    ops: c => `// depth = 1: chỉ 1 module phụ dự đoán token t+2.
+// Loss weight: 0.3 (đa số training) → 0.1 (khi decay LR).`,
+    notes:"Inference: speculative decoding."
+  }
+
+};
+
+/* ============================================================
+   DIAGRAMS
+   ============================================================ */
+const COLOR_MAP = {
+  att:  {fill:"#1f3a5a", stroke:"#5ab0ff"},
+  moe:  {fill:"#3a2c52", stroke:"#c198ff"},
+  mhc:  {fill:"#1f4536", stroke:"#57d39b"},
+  emb:  {fill:"#523f28", stroke:"#ffbf66"},
+  mtp:  {fill:"#522d3e", stroke:"#ff8db1"},
+  util: {fill:"#3a2424", stroke:"#ff7474"}
+};
+
+const DIAGRAMS = {
+  overall: {
+    title:"Toàn mạng — Dataflow của 1 microbatch",
+    lead:"Pipeline đầy đủ qua 1 block điển hình. E1..E_N routed experts được vẽ thực.",
+    note: c => `${c.label}: L_block = ${c.L_block}, D = ${c.D}, N = ${c.N}, H = ${c.H}, E = ${c.E}. Tổng: ${c.total}, activated/token: ${c.activated}.`,
+    nodes: c => {
+      const ns = [];
+      // Input
+      ns.push({id:"input_tokens", x:540, y:20, w:320, h:60, color:"util", label:"Khối 0 — Tokenize", sub: cc=>`token_ids[${cc.B} × ${cc.L_seq}]`});
+      ns.push({id:"embed", x:540, y:110, w:320, h:60, color:"emb", label:"Khối 1 — Embedding", sub: cc=>`H_0[B × L × D]`});
+      ns.push({id:"mhc_init", x:540, y:210, w:320, h:60, color:"mhc", label:"Khối 2 — mHC Init", sub: cc=>`X_0[B × L × ${cc.N} × D]`});
+      // Block header
+      ns.push({id:"block_hdr", x:260, y:310, w:880, h:34, color:"util", header:true,
+               label:`Block điển hình (lặp × ${c.L_block}) — mỗi block ≈ 47 khối`,
+               sub: cc=>"CSA/HCA xen kẽ; MoE Hash 3 layer đầu"});
+      // Pre-mHC attn
+      ns.push({id:"mhc_norm", x:540, y:360, w:320, h:50, color:"mhc", label:"Khối 3 — RMSNorm mHC"});
+      ns.push({id:"mhc_dyn_params", x:540, y:430, w:320, h:50, color:"mhc", label:"Khối 4 — Sinh Ã (einsum)"});
+      ns.push({id:"mhc_sigmoid", x:540, y:500, w:320, h:50, color:"util", label:"Khối 5 — σ(Ã) → A"});
+      ns.push({id:"mhc_update", x:540, y:570, w:320, h:50, color:"mhc", label:"Khối 6 — Mix â = A·X_l"});
+      // CSA path
+      ns.push({id:"csa_kv_proj", x:60, y:660, w:260, h:60, color:"att", label:"Khối 7-10 — KV Proj (a,b)"});
+      ns.push({id:"csa_query_lr", x:400, y:660, w:260, h:60, color:"att", label:"Khối 14 — Query Down"});
+      ns.push({id:"csa_swa_branch", x:900, y:660, w:260, h:60, color:"att", label:"Khối 23 — SWA Branch"});
+      ns.push({id:"csa_compress", x:20, y:770, w:200, h:60, color:"att", label:"Khối 11 — Compress m=4"});
+      ns.push({id:"csa_idx_keys", x:240, y:770, w:200, h:60, color:"att", label:"Khối 12-13 — Idx Keys"});
+      ns.push({id:"csa_indexer_q", x:460, y:770, w:200, h:60, color:"att", label:"Khối 15-16 — Idx Q (FP4)"});
+      ns.push({id:"csa_query_up", x:680, y:770, w:200, h:60, color:"att", label:"Khối 20-22 — Q Up + RoPE"});
+      ns.push({id:"csa_index_score", x:20, y:880, w:640, h:60, color:"att", label:"Khối 17-19 — Index Score + Top-K + Gather"});
+      ns.push({id:"csa_core_attn", x:440, y:1010, w:320, h:60, color:"att", label:"Khối 24-28 — Core MQA + Sink"});
+      ns.push({id:"csa_group_proj", x:440, y:1090, w:320, h:60, color:"att", label:"Khối 29-30 — Group Output"});
+      // Res-mHC attn
+      ns.push({id:"mhc_sinkhorn", x:60, y:1180, w:280, h:60, color:"mhc", label:"Khối 31-32 — Sinh B̃ + Sinkhorn"});
+      ns.push({id:"mhc_update2", x:540, y:1180, w:320, h:60, color:"mhc", label:"Khối 35 — Residual Update"});
+      // Post-mHC MoE
+      ns.push({id:"mhc_norm2", x:540, y:1290, w:320, h:50, color:"mhc", label:"Khối 36-39 — Post-mHC MoE → b̂"});
+      // MoE
+      ns.push({id:"moe_router", x:60, y:1370, w:280, h:60, color:"moe", label:"Khối 40 — Router (Sqrt(Softplus))"});
+      ns.push({id:"moe_shared", x:1100, y:1370, w:280, h:60, color:"moe", label:"Khối 41 — E_shared"});
+      // Expert grid
+      ns.push({id:"expert_hdr", x:260, y:1450, w:880, h:26, color:"moe", header:true,
+               label:`Routed Experts E1..E${c.E} — chỉ ${c.E_act} được kích hoạt / token`, sub: cc=>""});
+      const G_COLS = 16, G_BOX_W = 38, G_BOX_H = 22, G_GX = 4, G_GY = 5;
+      const G_X = 340, G_Y = 1490;
+      const rows = Math.ceil(c.E / G_COLS);
+      const gW = G_COLS*G_BOX_W + (G_COLS-1)*G_GX;
+      const gH = rows*G_BOX_H + (rows-1)*G_GY;
+      const G_END = G_Y + gH;
+      ns.push({id:"exp_top_anchor", x:G_X, y:G_Y-10, w:gW, h:6, color:"hidden", label:""});
+      for (let i = 0; i < c.E; i++) {
+        const row = Math.floor(i / G_COLS);
+        const col = i % G_COLS;
+        ns.push({id:`expert_${i+1}`,
+          x:G_X + col*(G_BOX_W + G_GX),
+          y:G_Y + row*(G_BOX_H + G_GY),
+          w:G_BOX_W, h:G_BOX_H,
+          color:"moe", small:true, label:`E${i+1}`});
+      }
+      ns.push({id:"exp_bot_anchor", x:G_X, y:G_END+5, w:gW, h:6, color:"hidden", label:""});
+      // Combine
+      ns.push({id:"moe_combine", x:540, y:G_END+40, w:320, h:60, color:"moe", label:"Khối 43-44 — Combine"});
+      // Res-mHC MoE + repeat
+      ns.push({id:"mhc_update3", x:540, y:G_END+130, w:320, h:60, color:"mhc", label:"Khối 45-49 — Residual Update MoE"});
+      ns.push({id:"repeat_cap", x:260, y:G_END+220, w:880, h:36, color:"util", header:true,
+               label:`↑ Block trên lặp × ${c.L_block} lần (CSA/HCA xen kẽ)`, sub: cc=>""});
+      // Output
+      ns.push({id:"final_norm", x:260, y:G_END+290, w:360, h:60, color:"emb", label:"Khối 50-52 — RMSNorm + LM Head"});
+      ns.push({id:"mtp", x:780, y:G_END+290, w:360, h:60, color:"mtp", label:"Khối 53-54 — MTP Module"});
+      return ns;
+    },
+    edges: c => {
+      const G_COLS = 16, G_BOX_H = 22, G_GY = 5;
+      const rows = Math.ceil(c.E / G_COLS);
+      const G_Y = 1490;
+      const G_END = G_Y + rows*G_BOX_H + (rows-1)*G_GY;
+      return [
+        ["input_tokens","embed"],
+        ["embed","mhc_init"],
+        ["mhc_init","block_hdr"],
+        ["block_hdr","mhc_norm"],
+        ["mhc_norm","mhc_dyn_params"],
+        ["mhc_dyn_params","mhc_sigmoid"],
+        ["mhc_sigmoid","mhc_update"],
+        ["mhc_update","csa_kv_proj"],
+        ["mhc_update","csa_query_lr"],
+        ["mhc_update","csa_swa_branch"],
+        ["csa_kv_proj","csa_compress"],
+        ["csa_kv_proj","csa_idx_keys"],
+        ["csa_query_lr","csa_indexer_q"],
+        ["csa_query_lr","csa_query_up"],
+        ["csa_compress","csa_index_score"],
+        ["csa_idx_keys","csa_index_score"],
+        ["csa_indexer_q","csa_index_score"],
+        ["csa_index_score","csa_core_attn"],
+        ["csa_query_up","csa_core_attn", {midY:990}],
+        ["csa_swa_branch","csa_core_attn", {midY:990}],
+        ["csa_core_attn","csa_group_proj"],
+        ["csa_group_proj","mhc_update2"],
+        ["mhc_sinkhorn","mhc_update2"],
+        ["mhc_update2","mhc_norm2"],
+        ["mhc_norm2","moe_router"],
+        ["mhc_norm2","moe_shared"],
+        ["moe_router","exp_top_anchor"],
+        ["exp_bot_anchor","moe_combine"],
+        ["moe_shared","moe_combine", {midY:G_END+20}],
+        ["moe_combine","mhc_update3"],
+        ["mhc_update3","repeat_cap"],
+        ["repeat_cap","final_norm"],
+        ["repeat_cap","mtp"]
+      ];
+    }
+  },
+
+  transformer: {
+    title:"Transformer Block (chi tiết)",
+    lead:"7 sublayer chính. Click từng khối để xem provenance / consumer.",
+    note: c => `Mỗi block ≈ 47 khối (CSA) hoặc 36 khối (HCA). Total ~ ${c.L_block} block.`,
+    nodes: c => [
+      {id:"mhc_init", x:260, y:20, w:380, h:56, color:"util", header:true, label:"INPUT: X_l[B × L × N × D]"},
+      {id:"mhc_norm", x:260, y:120, w:380, h:60, color:"mhc", label:"Khối 3 — RMSNorm (N, D)"},
+      {id:"mhc_dyn_params", x:260, y:210, w:380, h:60, color:"mhc", label:"Khối 4 — Sinh Ã"},
+      {id:"mhc_sigmoid", x:260, y:300, w:380, h:60, color:"util", label:"Khối 5 — σ(Ã) → A"},
+      {id:"mhc_update", x:260, y:390, w:380, h:60, color:"mhc", label:"Khối 6 — Mix â"},
+      {id:"csa_core_attn", x:260, y:490, w:380, h:60, color:"att", label:"Khối 7-30 — CSA / HCA sublayer"},
+      {id:"mhc_sinkhorn", x:260, y:580, w:380, h:60, color:"mhc", label:"Khối 31-34 — Sinh B̃/C̃ + Sinkhorn"},
+      {id:"mhc_update", x:260, y:670, w:380, h:60, color:"mhc", label:"Khối 35 — Residual Update (attn)"},
+      {id:"moe_router", x:260, y:760, w:380, h:60, color:"moe", label:"Khối 36-44 — DeepSeekMoE sublayer"},
+      {id:"mhc_update", x:260, y:850, w:380, h:60, color:"mhc", label:"Khối 45-49 — Residual Update (MoE)"},
+      {id:"final_norm", x:260, y:950, w:380, h:56, color:"util", header:true, label:"OUTPUT: X_{l+1}[B × L × N × D]"}
+    ],
+    edges: c => [
+      ["mhc_init","mhc_norm", {label:"X_l"}],
+      ["mhc_norm","mhc_dyn_params", {label:"X̂"}],
+      ["mhc_dyn_params","mhc_sigmoid", {label:"Ã"}]
+    ]
+  },
+
+  mhc: {
+    title:"mHC (Manifold-Constrained Hyper-Connections)",
+    lead:"Y-shape: Norm → Dynamic params (A/B/C) → Sinkhorn / Sigmoid → Residual update.",
+    note: c => `N = ${c.N}, T_max = ${c.T_max}.`,
+    nodes: c => [
+      {id:"mhc_init", x:260, y:20, w:380, h:56, color:"util", header:true, label:`INPUT: X_l[N × D] = [${c.N} × ${c.D}]`},
+      {id:"mhc_norm", x:260, y:120, w:380, h:60, color:"util", label:"Khối 3 — RMSNorm"},
+      {id:"mhc_dyn_params", x:20, y:220, w:280, h:60, color:"mhc", label:"Khối 4 — Sinh Ã"},
+      {id:"mhc_sinkhorn", x:340, y:220, w:280, h:60, color:"mhc", label:"Khối 31-32 — Sinh B̃ + Sinkhorn"},
+      {id:"mhc_sigmoid", x:660, y:220, w:280, h:60, color:"util", label:"Khối 5 (σ) + Khối 33-34 (2σ C̃)"},
+      {id:"mhc_update", x:260, y:340, w:400, h:60, color:"mhc", label:"Khối 6/35 — Mix + Residual Update"},
+      {id:"final_norm", x:260, y:440, w:400, h:56, color:"util", header:true, label:`OUTPUT: X_{l+1}[N × D]`}
+    ],
+    edges: c => [
+      ["mhc_init","mhc_norm"],
+      ["mhc_norm","mhc_dyn_params", {label:"X̂"}],
+      ["mhc_norm","mhc_sinkhorn", {label:"X̂"}],
+      ["mhc_norm","mhc_sigmoid", {label:"X̂"}],
+      ["mhc_dyn_params","mhc_update", {label:"A"}],
+      ["mhc_sinkhorn","mhc_update", {label:"B"}],
+      ["mhc_sigmoid","mhc_update", {label:"C"}],
+      ["mhc_update","final_norm"]
+    ]
+  },
+
+  csa: {
+    title:"CSA (Compressed Sparse Attention)",
+    lead:"Nén m=4 + Lightning Indexer top-K + MQA + Sliding Window + Grouped Output.",
+    note: c => `M = ${c.M}, K = ${c.K_topk}, H = ${c.H}, C = ${c.C}, D_C = ${c.D_C}.`,
+    nodes: c => [
+      {id:"mhc_update", x:60, y:20, w:260, h:56, color:"util", header:true, label:"INPUT: H[B × L × D]"},
+      {id:"mhc_update", x:400, y:20, w:260, h:56, color:"util", header:true, label:"INPUT: h_l[D] (query)"},
+      {id:"csa_kv_proj", x:60, y:110, w:260, h:60, color:"att", label:"Khối 7-10 — KV Proj (a, b)"},
+      {id:"csa_query_lr", x:400, y:110, w:260, h:60, color:"att", label:"Khối 14 — Query Down"},
+      {id:"csa_swa_branch", x:920, y:110, w:260, h:60, color:"att", label:"Khối 23 — SWA Branch"},
+      {id:"csa_compress", x:20, y:220, w:200, h:60, color:"att", label:"Khối 11 — Compress m=4"},
+      {id:"csa_idx_keys", x:240, y:220, w:200, h:60, color:"att", label:"Khối 12-13 — Idx Keys"},
+      {id:"csa_indexer_q", x:460, y:220, w:200, h:60, color:"att", label:"Khối 15-16 — Idx Q"},
+      {id:"csa_query_up", x:680, y:220, w:200, h:60, color:"att", label:"Khối 20-22 — Q Up"},
+      {id:"csa_index_score", x:20, y:340, w:640, h:60, color:"att", label:"Khối 17-19 — Index + Top-K + Gather"},
+      {id:"csa_core_attn", x:440, y:640, w:320, h:60, color:"att", label:"Khối 24-28 — Core MQA + Sink"},
+      {id:"csa_group_proj", x:440, y:750, w:320, h:60, color:"att", label:"Khối 29-30 — Group Output"},
+      {id:"final_norm", x:440, y:850, w:320, h:56, color:"util", header:true, label:"OUTPUT: out_att[B × L × D]"}
+    ],
+    edges: c => [
+      ["csa_kv_proj","csa_compress"],
+      ["csa_kv_proj","csa_idx_keys"],
+      ["csa_query_lr","csa_indexer_q"],
+      ["csa_query_lr","csa_query_up"],
+      ["csa_compress","csa_index_score"],
+      ["csa_idx_keys","csa_index_score"],
+      ["csa_indexer_q","csa_index_score"],
+      ["csa_index_score","csa_core_attn"],
+      ["csa_query_up","csa_core_attn", {midY:620}],
+      ["csa_swa_branch","csa_core_attn", {midY:620}],
+      ["csa_core_attn","csa_group_proj"],
+      ["csa_group_proj","final_norm"]
+    ]
+  },
+
+  hca: {
+    title:"HCA (Heavily Compressed Attention)",
+    lead:"Nén mạnh M' = 128, không có indexer & sparse selection. KV cache cực nhỏ.",
+    note: c => `M' = ${c.M_p}. KV cache HCA (L=1M): ~ 4.5 MB / layer.`,
+    nodes: c => [
+      {id:"mhc_update", x:60, y:20, w:260, h:56, color:"util", header:true, label:"INPUT: H[B × L × D]"},
+      {id:"mhc_update", x:400, y:20, w:260, h:56, color:"util", header:true, label:"INPUT: h_l[D]"},
+      {id:"hca_kv_proj", x:60, y:110, w:260, h:60, color:"att", label:"Khối 7H-8H — KV Proj (1 nhánh)"},
+      {id:"hca_query_lr", x:400, y:110, w:260, h:60, color:"att", label:"Khối 10H-13H — Query"},
+      {id:"csa_swa_branch", x:740, y:110, w:260, h:60, color:"att", label:"Khối 14H — SWA Branch"},
+      {id:"hca_compress", x:60, y:230, w:260, h:60, color:"att", label:"Khối 9H — Heavy Compress m'=128"},
+      {id:"hca_core_attn", x:340, y:360, w:340, h:60, color:"att", label:"Khối 15H-18H — Core MQA + Sink"},
+      {id:"hca_group_proj", x:340, y:470, w:340, h:60, color:"att", label:"Khối 19H — Group Output"},
+      {id:"final_norm", x:340, y:570, w:340, h:56, color:"util", header:true, label:"OUTPUT: out_att[B × L × D]"}
+    ],
+    edges: c => [
+      ["hca_kv_proj","hca_compress"],
+      ["hca_compress","hca_core_attn"],
+      ["hca_query_lr","hca_core_attn"],
+      ["csa_swa_branch","hca_core_attn", {midY:340}],
+      ["hca_core_attn","hca_group_proj"],
+      ["hca_group_proj","final_norm"]
+    ]
+  },
+
+  moe: {
+    title:"DeepSeekMoE",
+    lead:"1 shared expert + top-E_act routed experts (SwiGLU + clamping).",
+    note: c => `E = ${c.E}, E_act = ${c.E_act}, D_FF = ${c.D_FF}. Per expert ≈ ${fmt(3*c.D*c.D_FF)}.`,
+    nodes: c => [
+      {id:"mhc_update", x:320, y:20, w:360, h:56, color:"util", header:true, label:"INPUT: h[D] (= b̂)"},
+      {id:"moe_router", x:60, y:120, w:280, h:60, color:"moe", label:"Khối 40 — Router"},
+      {id:"moe_hash", x:380, y:120, w:280, h:60, color:"moe", label:"Khối 40-Hash (3 layer đầu)"},
+      {id:"moe_shared", x:700, y:120, w:280, h:60, color:"moe", label:"Khối 41 — E_shared"},
+      {id:"moe_routed", x:60, y:240, w:600, h:60, color:"moe", label:"Khối 42-43 — Routed Experts (E_act)"},
+      {id:"moe_combine", x:320, y:440, w:360, h:60, color:"moe", label:"Khối 44 — Combine"},
+      {id:"final_norm", x:320, y:540, w:360, h:56, color:"util", header:true, label:"OUTPUT: out_moe[D]"}
+    ],
+    edges: c => [
+      ["moe_router","moe_routed"],
+      ["moe_hash","moe_routed"],
+      ["moe_routed","moe_combine"],
+      ["moe_shared","moe_combine", {midY:420}],
+      ["moe_combine","final_norm"]
+    ]
+  },
+
+  emb: {
+    title:"Embedding & MTP",
+    lead:"Đầu vào / đầu ra + MTP module.",
+    note: c => `Embedding = LM head shape [${c.V} × ${c.D}], ${fmt(c.V*c.D)} params.`,
+    nodes: c => [
+      {id:"input_tokens", x:240, y:20, w:320, h:56, color:"util", header:true, label:"INPUT: token_ids"},
+      {id:"embed", x:240, y:120, w:320, h:60, color:"emb", label:"Khối 1 — Embedding"},
+      {id:"final_norm", x:60, y:240, w:320, h:60, color:"emb", label:"Khối 50-52 — RMSNorm + LM Head"},
+      {id:"mtp", x:420, y:240, w:320, h:60, color:"mtp", label:"Khối 53-54 — MTP"},
+      {id:"final_norm", x:60, y:350, w:320, h:56, color:"util", header:true, label:"OUTPUT: logits"},
+      {id:"mtp", x:420, y:350, w:320, h:56, color:"util", header:true, label:"OUTPUT: logits_MTP"}
+    ],
+    edges: c => [
+      ["input_tokens","embed"],
+      ["embed","final_norm"],
+      ["embed","mtp"]
+    ]
+  }
+};
+
+/* ============================================================
+   Render
+   ============================================================ */
+function renderDiagram() {
+  const cfg = CFG[variant];
+  const d = DIAGRAMS[currentTab];
+  document.getElementById("tab-title").innerHTML =
+    `<h2>${d.title}</h2><p class="lead">${d.lead}</p>`;
+  document.getElementById("diagram-note").textContent = d.note(cfg);
+
+  const svg = document.getElementById("diagram");
+  const defs = svg.querySelector("defs");
+  svg.innerHTML = "";
+  svg.appendChild(defs);
+
+  const nodes = typeof d.nodes === "function" ? d.nodes(cfg) : d.nodes;
+  const edges = typeof d.edges === "function" ? d.edges(cfg) : d.edges;
+
+  let xMax = 0, yMax = 0;
+  nodes.forEach(n => { xMax = Math.max(xMax, n.x+n.w); yMax = Math.max(yMax, n.y+n.h); });
+  const vbW = xMax + 40, vbH = yMax + 40;
+  svg.setAttribute("viewBox", `0 0 ${vbW} ${vbH}`);
+  svg.setAttribute("width", vbW);
+  svg.setAttribute("height", vbH);
+
+  function elbowPath(na, nb, opts) {
+    opts = opts || {};
+    if (nb.y >= na.y + na.h) {
+      const aX = na.x + na.w/2, aY = na.y + na.h;
+      const bX = nb.x + nb.w/2, bY = nb.y;
+      if (Math.abs(aX - bX) < 2) return `M ${aX} ${aY} L ${bX} ${bY}`;
+      const midY = opts.midY != null ? opts.midY : (aY + bY) / 2;
+      return `M ${aX} ${aY} L ${aX} ${midY} L ${bX} ${midY} L ${bX} ${bY}`;
+    }
+    return `M ${na.x+na.w/2} ${na.y+na.h} L ${nb.x+nb.w/2} ${nb.y}`;
+  }
+
+  edges.forEach(e => {
+    const [a, b, opts] = e;
+    const na = nodes.find(n=>n.id===a);
+    const nb = nodes.find(n=>n.id===b);
+    if (!na || !nb) return;
+    const path = document.createElementNS("http://www.w3.org/2000/svg","path");
+    path.setAttribute("d", elbowPath(na, nb, opts));
+    path.setAttribute("class","arrow");
+    svg.appendChild(path);
+    if (opts && opts.label) {
+      const aX = na.x + na.w/2, aY = na.y + na.h;
+      const bX = nb.x + nb.w/2, bY = nb.y;
+      const midY = opts.midY != null ? opts.midY : (aY + bY) / 2;
+      const t = document.createElementNS("http://www.w3.org/2000/svg","text");
+      t.setAttribute("x", (aX + bX) / 2);
+      t.setAttribute("y", midY - 4);
+      t.setAttribute("text-anchor","middle");
+      t.setAttribute("class","arrow-label");
+      t.textContent = opts.label;
+      svg.appendChild(t);
+    }
+  });
+
+  nodes.forEach(n => {
+    if (n.color === "hidden") return;
+    const g = document.createElementNS("http://www.w3.org/2000/svg","g");
+    let cls = "node";
+    if (n.small)  cls += " small";
+    if (n.header) cls += " header";
+    if (selectedNodeId === n.id) cls += " selected";
+    g.setAttribute("class", cls);
+    g.setAttribute("transform", `translate(${n.x}, ${n.y})`);
+    g.addEventListener("click", () => selectNode(n.id));
+
+    const col = COLOR_MAP[n.color];
+    const rect = document.createElementNS("http://www.w3.org/2000/svg","rect");
+    rect.setAttribute("width", n.w);
+    rect.setAttribute("height", n.h);
+    rect.setAttribute("rx", n.small ? 3 : 10);
+    rect.setAttribute("fill", col.fill);
+    rect.setAttribute("stroke", col.stroke);
+    rect.setAttribute("stroke-width", 1.4);
+    g.appendChild(rect);
+
+    const t1 = document.createElementNS("http://www.w3.org/2000/svg","text");
+    t1.setAttribute("x", n.w/2);
+    t1.setAttribute("y", n.small ? n.h/2 + 3 : 22);
+    t1.setAttribute("text-anchor","middle");
+    t1.setAttribute("font-size", n.small ? "9" : "12");
+    t1.textContent = n.label;
+    g.appendChild(t1);
+
+    if (n.sub && !n.small) {
+      const subText = typeof n.sub === "function" ? n.sub(cfg) : n.sub;
+      if (subText) {
+        const t2 = document.createElementNS("http://www.w3.org/2000/svg","text");
+        t2.setAttribute("x", n.w/2);
+        t2.setAttribute("y", n.header ? n.h - 6 : 42);
+        t2.setAttribute("text-anchor","middle");
+        t2.setAttribute("font-size","10.5");
+        t2.setAttribute("class","sub");
+        t2.textContent = subText;
+        g.appendChild(t2);
+      }
+    }
+
+    svg.appendChild(g);
+  });
+}
+
+function renderSide() {
+  const side = document.getElementById("side");
+  if (!selectedNodeId) {
+    side.innerHTML = '<div class="placeholder">Chọn một khối để xem chi tiết.</div>';
+    return;
+  }
+  const cfg = CFG[variant];
+  const ALIAS = {
+    exp_top_anchor: null, exp_bot_anchor: null,
+    block_hdr: null, expert_hdr: null, repeat_cap: null,
+    mhc_update2: "mhc_update", mhc_update3: "mhc_update",
+    mhc_norm2: "mhc_update"
+  };
+  let expertIdx = null;
+  let lookupId;
+  if (selectedNodeId.startsWith("expert_")) {
+    lookupId = "moe_one_expert";
+    expertIdx = selectedNodeId.replace("expert_","");
+  } else if (ALIAS[selectedNodeId] === null) {
+    side.innerHTML = '<div class="placeholder">Khối phụ (header/anchor) — chọn khối compute để xem chi tiết.</div>';
+    return;
+  } else if (ALIAS[selectedNodeId]) {
+    lookupId = ALIAS[selectedNodeId];
+  } else {
+    lookupId = selectedNodeId;
+  }
+  const info = NODES[lookupId];
+  if (!info) {
+    side.innerHTML = '<div class="placeholder">Chưa có thông tin cho khối này.</div>';
+    return;
+  }
+
+  const [tagClass, tagText] = info.tag;
+  const ins = info.inputs(cfg);
+  const ws  = info.weights(cfg);
+  const outs= info.outputs(cfg);
+  const totalParams = ws.reduce((s,w)=> s + (w.params||0), 0);
+
+  const titleText = expertIdx ? `${info.title} — E${expertIdx} / E${cfg.E}` : info.title;
+  let html = `<span class="tag ${tagClass}">${tagText}</span>
+              <h3>${titleText}</h3>
+              <p style="color:var(--muted); margin-top:6px">${info.desc}</p>`;
+
+  html += `<h4>Input tensors</h4>`;
+  ins.forEach(t => {
+    const extra = [];
+    if (t.range)    extra.push("range: " + t.range);
+    if (t.dtype)    extra.push("dtype: " + t.dtype);
+    if (t.from)     extra.push('<span style="color:var(--green)">⟵ Nơi tạo: ' + t.from + '</span>');
+    if (t.desc)     extra.push(t.desc);
+    html += `<div class="row"><div class="k">${t.name}</div><div class="v">${t.shape}${extra.length? '<br><span style="color:var(--muted)">'+extra.join('<br>')+'</span>':''}</div></div>`;
+  });
+
+  html += `<h4>Weight tensors</h4>`;
+  ws.forEach(t => {
+    const extra = [];
+    if (t.params) extra.push("# params: " + fmt(t.params));
+    if (t.dtype)  extra.push("dtype: " + t.dtype);
+    if (t.desc)   extra.push(t.desc);
+    html += `<div class="row"><div class="k">${t.name}</div>
+             <div class="v">${t.shape}${extra.length? '<br><span style="color:var(--muted)">'+extra.join('<br>')+'</span>':''}</div></div>`;
+  });
+  if (totalParams > 0) {
+    html += `<div class="row"><div class="k"><b>Tổng params</b></div><div class="v"><b>${fmt(totalParams)}</b></div></div>`;
+  }
+
+  html += `<h4>Output tensors</h4>`;
+  outs.forEach(t => {
+    const extra = [];
+    if (t.from)  extra.push('<span style="color:var(--accent)">= ' + t.from + '</span>');
+    if (t.bytes) extra.push("memory: " + bytesFmt(t.bytes));
+    if (t.dtype) extra.push("dtype: " + t.dtype);
+    if (t.to)    extra.push('<span style="color:var(--pink)">⟶ Nơi dùng: ' + (Array.isArray(t.to) ? t.to.join(", ") : t.to) + '</span>');
+    if (t.desc)  extra.push(t.desc);
+    html += `<div class="row"><div class="k">${t.name}</div>
+             <div class="v">${t.shape}${extra.length? '<br><span style="color:var(--muted)">'+extra.join('<br>')+'</span>':''}</div></div>`;
+  });
+
+  html += `<h4>Phép toán chi tiết</h4><div class="formula">${info.ops(cfg)}</div>`;
+  if (info.notes) html += `<h4>Ghi chú</h4><div class="note">${info.notes}</div>`;
+
+  side.innerHTML = html;
+}
+
+function selectNode(id) {
+  selectedNodeId = id;
+  renderDiagram();
+  renderSide();
+}
+
+document.getElementById("variant-toggle").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-variant]");
+  if (!btn) return;
+  document.querySelectorAll("#variant-toggle button").forEach(b=>b.classList.remove("active"));
+  btn.classList.add("active");
+  variant = btn.dataset.variant;
+  renderDiagram();
+  renderSide();
+});
+
+document.getElementById("tabs").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-tab]");
+  if (!btn) return;
+  document.querySelectorAll("#tabs button").forEach(b=>b.classList.remove("active"));
+  btn.classList.add("active");
+  currentTab = btn.dataset.tab;
+  selectedNodeId = null;
+  renderDiagram();
+  renderSide();
+});
+
+renderDiagram();
+renderSide();
+</script>
+</body>
+</html>

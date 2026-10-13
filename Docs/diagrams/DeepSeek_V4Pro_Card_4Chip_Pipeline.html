@@ -1,0 +1,130 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>4 chip / 1 card — pipeline 2 tầng FRONT∥ECA, song song TP & EP</title>
+<style>
+ body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#fff;color:#1a1a1a;line-height:1.45}
+ .wrap{max-width:1400px;margin:0 auto;padding:18px 22px 60px}
+ h1{font-size:19px;margin:0 0 4px}
+ p{font-size:13px;color:#333}
+ .mut{color:#6b7280;font-size:12px}
+ .ctl{margin:10px 0 6px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+ .b{padding:3px 10px;border:.5px solid #cbd5e1;border-radius:7px;cursor:pointer;font-size:12px;background:#fff}
+ .scroll{overflow:auto;border:.5px solid #e5e7eb;border-radius:8px;padding:6px 0;background:#fff;max-height:82vh}
+ .lg{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#6b7280;margin-right:11px}
+ .sw{width:13px;height:13px;border-radius:3px;display:inline-block;border:.5px solid #999}
+ .tag{display:inline-block;background:#eef2ff;color:#1e2761;border-radius:6px;font-size:11px;padding:1px 7px;margin-left:6px;vertical-align:middle}
+ code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px}
+ #tip{position:fixed;display:none;max-width:350px;background:#111827;color:#fff;font-size:11.5px;line-height:1.4;padding:7px 9px;border-radius:7px;box-shadow:0 4px 14px rgba(0,0,0,.25);pointer-events:none;z-index:50}
+</style></head>
+<body><div class="wrap">
+<h1>4 chip / 1 card — pipeline 2 tầng FRONT∥ECA, song song TP &amp; EP <span class="tag">interactive</span></h1>
+<p>Cả <b>4 chip</b> chạy <b>cùng lịch</b> (thẳng hàng thời gian) nhưng trên <b>slice khác nhau</b>: QCAU/GOPU chia <b>head (TP)</b>, ECA chia <b>expert (EP)</b>; FU replicated thì 4 chip giống nhau. Trong mỗi chip: <b style="color:#1e4e79">FRONT</b> (FU1–9) ∥ <b style="color:#92400e">ECA</b> (FU10) cho chunk/user khác nhau (wavefront). Băng dọc <b style="color:#6b21a8">tím</b> = ICI (all-reduce / all-to-all) — 4 chip đồng bộ. <b>Màu nhạt = user</b>. Di chuột để xem chip · FU · slice · tensor · GOP.</p>
+<div class="ctl"><span class="mut">Số chunk/user:</span>
+ <input id="nsl" type="range" min="2" max="6" step="1" value="4" style="vertical-align:middle;width:150px"><span class="mut" id="nlab">4</span>
+ <span class="mut" style="margin-left:10px">Zoom:</span><span class="b" id="zo">–</span><span class="b" id="zr">Fit</span><span class="b" id="zi">+</span><span class="mut" id="zlab">1.0×</span></div>
+<div class="lg"><span class="sw" style="background:#dbeafe;border-color:#0c447c"></span>mSGDMA weight</div>
+<div class="lg"><span class="sw" style="background:#cfe0f2;border-color:#1e4e79"></span>user A</div>
+<div class="lg"><span class="sw" style="background:#d4f3df;border-color:#27500A"></span>user B</div>
+<div class="lg"><span class="sw" style="background:#fde9b8;border-color:#92400e"></span>user C…</div>
+<div class="lg"><span class="sw" style="background:#ead9fb;border-color:#6b21a8"></span>ICI sync</div>
+<div class="lg"><span class="sw" style="background:#f6e4e4;border-color:#c7a6a6"></span>ECA chờ (read-bound)</div>
+<div class="scroll"><div id="chart"></div></div>
+<p class="note mut" id="sum"></p>
+<div id="tip"></div>
+
+<script>
+(function(){
+ var BW=820, TOPS=36.9, rows=256;
+ var USERS=['U6','U7','U8','U9','U10','U11'];
+ var PAL=[['#cfe0f2','#1e4e79'],['#d4f3df','#27500A'],['#fde9b8','#92400e'],['#e7d9f7','#6b21a8'],['#fcd9d9','#7f1d1d'],['#d9f0f0','#0f766e']];
+ var CHIP=[{h:'0–31',e:'e0–95',g:'0–3'},{h:'32–63',e:'e96–191',g:'4–7'},{h:'64–95',e:'e192–287',g:'8–11'},{h:'96–127',e:'e288–383',g:'12–15'}];
+ var STEPS=[
+  {fu:'mHCE',grp:'F',op:'RMSNorm+mix',gop:0.4,mode:'rep'},
+  {fu:'ACU',grp:'F',op:'KV-compress',gop:7.5,mode:'rep',wt:'W_aKV/bKV',wmb:14.7},
+  {fu:'LIU',grp:'F',op:'indexer Top-k',gop:12.3,mode:'rep',wt:'W_DQ/IUQ',wmb:24},
+  {fu:'QCAU',grp:'F',op:'MQA+RoPE',gop:32.2,mode:'tp',slice:'h',wt:'W_UQ',wmb:25.2},
+  {fu:'GOPU',grp:'F',op:'output proj',gop:23.6,mode:'tp',slice:'g',wt:'W_O',wmb:46},
+  {fu:'ICI',grp:'F',op:'all-reduce ô',gop:0,mode:'comm'},
+  {fu:'mHCE',grp:'F',op:'cộng ô',gop:0.4,mode:'rep'},
+  {fu:'MRU',grp:'F',op:'router Top-6',gop:1.4,mode:'rep',wt:'W_router',wmb:2.75},
+  {fu:'ICI',grp:'F',op:'a2a dispatch',gop:0,mode:'comm'},
+  {fu:'ECA',grp:'E',op:'SwiGLU expert',gop:59.2,mode:'ep',slice:'e',eca:1},
+  {fu:'ICI',grp:'B',op:'a2a combine',gop:0,mode:'comm'},
+  {fu:'mHCE',grp:'B',op:"cộng y→X'",gop:0.4,mode:'rep'}
+ ];
+ var Egb=96*33/1000, Eload=Egb*1000/BW, Ecomp=59.2/TOPS, eT=Math.round(Egb*1000/8);
+ function compMs(g){return g*rows/256/TOPS;}
+ function durOf(s){if(s.eca)return Math.max(Eload,compMs(s.gop));if(s.mode=='comm')return 0.12;return Math.max(0.10,compMs(s.gop));}
+ var DUR=STEPS.map(durOf);
+ var fIdx=[],eIdx=-1,bIdx=[];STEPS.forEach(function(s,i){if(s.grp=='F')fIdx.push(i);else if(s.grp=='E')eIdx=i;else bIdx.push(i);});
+ var cumF=[],fa=0;fIdx.forEach(function(i){cumF.push(fa);fa+=DUR[i];});var FRONTtot=fa;
+ var ECAdur=DUR[eIdx];var cumB=[],ba=0;bIdx.forEach(function(i){cumB.push(ba);ba+=DUR[i];});var BACKtot=ba;
+ var P=Math.max(ECAdur,FRONTtot);
+ var st={n:4,zoom:1};
+ function r2(x){return x.toFixed(2);}
+ function rect(x,y,w,h,f,s,sw,tip){return '<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+Math.max(0,w).toFixed(1)+'" height="'+h.toFixed(1)+'" rx="2" fill="'+f+'" stroke="'+s+'" stroke-width="'+sw+'"'+(tip?' data-tip="'+tip.replace(/"/g,'&quot;')+'" style="cursor:help"':'')+'/>';}
+ function line(x1,y1,x2,y2,c,w){return '<line x1="'+x1.toFixed(1)+'" y1="'+y1.toFixed(1)+'" x2="'+x2.toFixed(1)+'" y2="'+y2.toFixed(1)+'" stroke="'+c+'" stroke-width="'+w+'"/>';}
+ function txt(x,y,t,c,fs,a,b){return '<text x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" font-size="'+(fs||10)+'" fill="'+c+'" text-anchor="'+(a||'start')+'"'+(b?' font-weight="700"':'')+'>'+t+'</text>';}
+ function sliceLab(s,ci){if(s.slice=='h')return 'head '+CHIP[ci].h;if(s.slice=='g')return 'group '+CHIP[ci].g;if(s.slice=='e')return CHIP[ci].e;return '';}
+ function modeName(m){return m=='tp'?'TP':m=='ep'?'EP':m=='comm'?'ICI':'rep';}
+
+ function build(){
+  var n=st.n;
+  var Ff=[],Es=[],Ee=[];for(var i=0;i<n;i++){Ff[i]=i*P;Es[i]=Ff[i]+FRONTtot;Ee[i]=Es[i]+ECAdur;}
+  var total=Ee[n-1]+BACKtot;
+  var baseS=Math.max(20,Math.min(58,1050/total)), S=baseS*st.zoom;
+  var L=150, top=44, rh=11, rstep=14, gh=16, nrowG=1+STEPS.length, gpad=10;
+  var grpH=gh+nrowG*rstep, W=L+total*S+30, botY=top+4*(grpH+gpad)-gpad, Hh=botY+12;
+  var sv='<svg viewBox="0 0 '+Math.round(W)+' '+Math.round(Hh)+'" style="min-width:'+Math.round(W)+'px" xmlns="http://www.w3.org/2000/svg">';
+  var tstep=S<28?2:1;
+  for(var t=0;t<=Math.ceil(total);t+=tstep){var xx=L+t*S;sv+=line(xx,top-8,xx,botY,'#f3f4f8',0.6)+txt(xx,top-12,t+'ms','#bcc3cf',9,'middle');}
+  // ICI sync bands (full height) per chunk per comm step
+  for(var ci=0;ci<n;ci++){STEPS.forEach(function(s,si){if(s.mode!='comm')return;var base,off;if(s.grp=='F'){base=Ff[ci];off=cumF[fIdx.indexOf(si)];}else{base=Ee[ci];off=cumB[bIdx.indexOf(si)];}var x=L+(base+off)*S,w=DUR[si]*S;sv+=rect(x,top-2,w,botY-top+2,'#f5effb','#e3d4f6',0.6,'ICI '+s.op+' — '+USERS[ci%USERS.length]+' · 4 chip ĐỒNG BỘ');});}
+  // 4 chip groups
+  for(var c=0;c<4;c++){var gy=top+c*(grpH+gpad);
+   sv+=rect(L,gy,total*S,grpH,(c%2?'#fcfdff':'#ffffff'),'#e7ebf2',0.7);
+   sv+=txt(8,gy+12,'Chip C·'+c,'#1e2761',11.5,'start',1);
+   sv+=txt(8,gy+gh+9,'head '+CHIP[c].h,'#1e4e79',7.5)+txt(8,gy+gh+19,CHIP[c].e,'#92400e',7.5);
+   // group bracket FRONT/ECA/BACK
+   sv+=rect(118,gy+gh+1*rstep,3,9*rstep-2,'#1e4e79','#1e4e79',0);
+   sv+=rect(118,gy+gh+10*rstep,3,rstep-2,'#92400e','#92400e',0);
+   sv+=rect(118,gy+gh+11*rstep,3,2*rstep-2,'#6b21a8','#6b21a8',0);
+   var rn=['mSGDMA'].concat(STEPS.map(function(s,i){return (i+1)+'·'+s.fu;}));
+   for(var rr=0;rr<nrowG;rr++){var ry=gy+gh+rr*rstep;sv+=txt(58,ry+rh-2,rn[rr],rr==0?'#9a3412':'#444',7.5,'start',rr==0);}
+   for(var ci2=0;ci2<n;ci2++){(function(ci){var col=PAL[ci%PAL.length],u=USERS[ci%USERS.length];
+     // FRONT FUs
+     fIdx.forEach(function(si,kk){var s=STEPS[si],x=L+(Ff[ci]+cumF[kk])*S,w=DUR[si]*S,y=gy+gh+(si+1)*rstep;var cc=s.mode=='comm'?['#ead9fb','#6b21a8']:col;
+       sv+=rect(x,y,w,rh,cc[0],cc[1],1,'C·'+c+' FRONT · '+u+' · '+s.fu+' '+s.op+' · '+modeName(s.mode)+(s.slice?' ['+sliceLab(s,c)+']':' (4 chip giống)')+' · tensor='+(s.wt||'act')+'['+u+'] ('+rows+' row) · GOP='+(s.gop*rows/256).toFixed(2));
+       if(w>15)sv+=txt(x+w/2,y+rh-2,u,cc[1],7,'middle');});
+     // ECA
+     var ex=L+Es[ci]*S,ew=ECAdur*S,gw=ew*(Ecomp/ECAdur),ey=gy+gh+(eIdx+1)*rstep;
+     sv+=rect(ex,ey,gw,rh,col[0],col[1],1,'C·'+c+' ECA · '+u+' · SwiGLU expert · EP slice '+CHIP[c].e+' · tensor=y['+u+'] ('+rows+' row) · GOP=59.2 · compute '+r2(Ecomp)+' ms');
+     sv+=rect(ex+gw,ey,ew-gw,rh,'#f6e4e4','#c7a6a6',1,'C·'+c+' ECA · '+u+' — DSP chờ weight (read-bound) '+r2(ECAdur-Ecomp)+' ms');
+     if(ew>15)sv+=txt(ex+ew/2,ey+rh-2,u,col[1],7,'middle');
+     // mSGDMA: expert stream (riêng chip) + attn weight
+     sv+=rect(ex,gy+gh,ew,rh,'#dbeafe','#0c447c',1,'C·'+c+' mSGDMA · '+u+' · stream expert '+CHIP[c].e+' ('+Egb.toFixed(2)+' GB · '+eT+' tile) HBM→WTB');
+     if(ew>48)sv+=txt(ex+ew/2,gy+gh+rh-2,Egb.toFixed(2)+'GB','#0c447c',7,'middle');
+     sv+=rect(L+Ff[ci]*S,gy+gh,Math.max(4,(0.113/BW*1000)*S+4),rh,'#dbeafe','#0c447c',1,'C·'+c+' mSGDMA · '+u+' · weight attention 113 MB HBM→WTB (prefetch)');
+     // BACK
+     bIdx.forEach(function(si,kk){var s=STEPS[si],x=L+(Ee[ci]+cumB[kk])*S,w=DUR[si]*S,y=gy+gh+(si+1)*rstep;var cc=s.mode=='comm'?['#ead9fb','#6b21a8']:col;sv+=rect(x,y,w,rh,cc[0],cc[1],1,'C·'+c+' BACK · '+u+' · '+s.fu+' '+s.op);if(w>15)sv+=txt(x+w/2,y+rh-2,u,cc[1],7,'middle');});
+   })(ci2);}
+  }
+  sv+='</svg>';
+  document.getElementById('chart').innerHTML=sv;
+  var seqT=n*(FRONTtot+ECAdur+BACKtot), pipeT=total;
+  document.getElementById('sum').innerHTML='<b>4 chip × '+n+' chunk</b>. Cả 4 chip chạy cùng lịch wavefront (FRONT(U_{i+1}) ∥ ECA(U_i)) nhưng slice khác nhau: <b style="color:#1e4e79">TP</b> QCAU/GOPU mỗi chip 1 head/group; <b style="color:#92400e">EP</b> ECA mỗi chip 96 expert riêng (stream weight riêng '+Egb.toFixed(2)+' GB). Băng tím = ICI all-reduce/all-to-all đồng bộ 4 chip. Pipeline '+r2(pipeT)+' ms vs tuần tự '+r2(seqT)+' ms ⇒ ×<b>'+(seqT/pipeT).toFixed(2)+'</b>; chu kỳ '+r2(P)+' ms/chunk (ECA-bound). Cuộn ngang xem thời gian, cuộn dọc xem 4 chip.';
+ }
+
+ var TIP=document.getElementById('tip'), CH=document.getElementById('chart');
+ CH.addEventListener('mousemove',function(e){var t=e.target.closest('[data-tip]');if(t){TIP.textContent=t.getAttribute('data-tip');TIP.style.display='block';var nx=e.clientX+14;if(nx+360>window.innerWidth)nx=e.clientX-360;TIP.style.left=nx+'px';TIP.style.top=(e.clientY+14)+'px';}else TIP.style.display='none';});
+ CH.addEventListener('mouseleave',function(){TIP.style.display='none';});
+ var NSL=document.getElementById('nsl');NSL.addEventListener('input',function(){st.n=+NSL.value;document.getElementById('nlab').textContent=st.n;build();});
+ function setZ(z){st.zoom=Math.max(0.5,Math.min(6,z));document.getElementById('zlab').textContent=st.zoom.toFixed(1)+'×';build();}
+ document.getElementById('zi').addEventListener('click',function(){setZ(st.zoom*1.3);});
+ document.getElementById('zo').addEventListener('click',function(){setZ(st.zoom/1.3);});
+ document.getElementById('zr').addEventListener('click',function(){setZ(1);});
+ CH.addEventListener('wheel',function(e){if(e.ctrlKey||e.metaKey){e.preventDefault();setZ(st.zoom*(e.deltaY<0?1.12:0.89));}},{passive:false});
+ build();
+})();
+</script>
+<p class="mut" style="margin-top:22px">DeepSeek-V4-Pro Accelerator · tài liệu nội bộ · 4 chip/card pipeline 2 tầng FRONT∥ECA, TP/EP song song. Bổ trợ <code>DeepSeek_V4Pro_Accelerator_Explorer.html</code>.</p>
+</div></body></html>

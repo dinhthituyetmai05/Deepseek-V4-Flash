@@ -1,0 +1,1248 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepSeek-V4-Pro trên Alveo U250 — Giải thích hoạt động 1 chip (8 layer)</title>
+<style>
+  :root{
+    --compute:#2563eb; --buffer:#16a34a; --memory:#ea580c; --control:#64748b;
+    --wire:#334155; --text:#0f172a; --hl:#f59e0b;
+    --act-c:#7c3aed; --act-r:#2563eb; --act-w:#16a34a; --act-i:#e2e8f0;
+  }
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+       margin:0;padding:16px;color:var(--text);background:#f8fafc}
+  h1{font-size:17px;margin:0 0 2px}
+  .meta{color:#64748b;font-size:12px;margin:0 0 8px}
+  .kpis{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .kpi{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:6px 12px;font-size:12px}
+  .kpi b{font-size:14px;display:block}
+  .wrap{display:flex;gap:14px;align-items:flex-start}
+  .left{flex:1;min-width:0}
+  .panel{width:390px;flex:none;background:#fff;border:1px solid #e2e8f0;border-radius:10px;
+         padding:14px;position:sticky;top:10px;font-size:12.5px;max-height:92vh;overflow:auto}
+  .panel h2{font-size:14px;margin:0 0 4px}
+  .panel h3{font-size:12px;margin:10px 0 4px;color:#475569;text-transform:uppercase;letter-spacing:.03em}
+  .panel table{border-collapse:collapse;width:100%}
+  .panel td{border:1px solid #e2e8f0;padding:4px 6px;vertical-align:top}
+  .panel td:first-child{color:#475569;white-space:nowrap;width:35%}
+  .panel .io li{margin:2px 0}
+  .panel ul{margin:2px 0 2px 16px;padding:0}
+  .tag{display:inline-block;border-radius:5px;padding:1px 7px;font-size:11px;font-weight:700;color:#fff}
+  svg{border:1px solid #e2e8f0;border-radius:8px;background:#fff;max-width:100%;display:block}
+  .legend{display:flex;gap:12px;font-size:11.5px;margin:6px 0;flex-wrap:wrap}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .sw{width:12px;height:12px;border-radius:3px;border:1px solid rgba(0,0,0,.15)}
+  .blk{stroke-width:2;fill:#fff;cursor:pointer}
+  .blk.compute{stroke:var(--compute)} .blk.buffer{stroke:var(--buffer)}
+  .blk.memory{stroke:var(--memory)} .blk.control{stroke:var(--control)}
+  .blk.dim{opacity:.35} .wire.dim{opacity:.18}
+  .blk.active{fill:#fef3c7;stroke-width:3.5}
+  .blk.selected{stroke:var(--hl);stroke-width:3.5}
+  .blk-title{font-weight:700;font-size:12.5px;pointer-events:none}
+  .blk-spec{font-size:10.5px;fill:#334155;pointer-events:none}
+  .wire{stroke:var(--wire);fill:none}
+  .wire.hot{stroke-width:5 !important}
+  .wire-lbl{font-size:10px;fill:#0f172a}
+  .wire-lbl-bg{fill:#fff;opacity:.85}
+  .steps{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;margin-top:12px}
+  .steps h2{font-size:14px;margin:0 0 6px}
+  .stepbar{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+  .stepbar button{border:1px solid #cbd5e1;background:#fff;border-radius:7px;
+       padding:5px 13px;font-size:13px;cursor:pointer}
+  .stepbar button:hover{background:#f1f5f9}
+  .stepbar button.play{background:var(--compute);color:#fff;border-color:var(--compute)}
+  .lyr{font-size:12.5px;font-weight:700;background:#eef2ff;border-radius:6px;padding:4px 10px}
+  #stepdesc{font-size:12.5px;background:#f8fafc;border-left:3px solid var(--compute);
+       padding:7px 10px;border-radius:0 6px 6px 0;min-height:34px}
+  .steplist{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:4px;margin-top:8px}
+  .steplist div{font-size:11px;border:1px solid #e2e8f0;border-radius:6px;padding:3px 7px;cursor:pointer}
+  .steplist div.cur{background:#fef3c7;border-color:var(--hl);font-weight:700}
+  .gantt{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;margin-top:12px}
+  .gantt h2{font-size:14px;margin:0 0 6px}
+  .note{font-size:11.5px;color:#64748b;margin-top:4px}
+  .wfbox{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;margin-top:12px}
+  .wfbox h2{font-size:14px;margin:0 0 6px}
+  .wf-sig{font-size:10.5px;font-weight:700;fill:#334155}
+  .wf-seg{font-size:10px;fill:#475569}
+  .wf-dur{font-size:8.5px;fill:#94a3b8}
+  .wf-bit{stroke:#2563eb;stroke-width:1.6;fill:none}
+  .wf-bus{stroke:#7c3aed;stroke-width:1.3;fill:#f5f3ff}
+  .wf-buslbl{font-size:8.5px;fill:#5b21b6;font-weight:600}
+  .wf-idle{stroke:#cbd5e1;stroke-width:1.2}
+  .wf-grid{stroke:#e2e8f0;stroke-dasharray:3 3}
+
+  /* ===== time-space (theo timespace-template chuẩn hw-diagram) ===== */
+  .tsx-controls{margin:6px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .tsx-controls button{font-size:12px;padding:4px 10px;border:1px solid #cbd5e1;background:#f8fafc;border-radius:6px;cursor:pointer}
+  .tsx-controls button:hover{background:#eef2f7}
+  .tsx-wrap{overflow:auto;border:1px solid #e2e8f0;border-radius:8px}
+  .tsx{border-collapse:collapse;white-space:nowrap;font-size:12px}
+  .tsx th,.tsx td{border:1px solid #e2e8f0;padding:0;text-align:center;height:28px}
+  .tsx thead th{background:#f1f5f9;font-weight:600;padding:4px 8px;position:sticky;top:0;z-index:2}
+  .tsx .rowhdr{background:#f1f5f9;text-align:left;padding:4px 8px;position:sticky;left:0;z-index:1;font-weight:500;min-width:190px}
+  .tsx .rowhdr.group{background:#e0e7ff;cursor:pointer;font-weight:700}
+  .tsx .rowhdr .tri{display:inline-block;width:12px;color:#64748b}
+  .tsx td.cell{min-width:56px;color:#fff;font-size:10.5px;font-weight:600;cursor:default;text-shadow:0 1px 1px rgba(0,0,0,.25)}
+  .tsx td.compute{background:var(--act-c)}
+  .tsx td.read{background:var(--act-r)}
+  .tsx td.write{background:var(--act-w)}
+  .tsx td.stall{background:#cbd5e1;color:#475569;text-shadow:none}
+  .tsx td.mixed{background:repeating-linear-gradient(45deg,#7c3aed,#7c3aed 6px,#2563eb 6px,#2563eb 12px,#16a34a 12px,#16a34a 18px)}
+  .tsx td.empty{background:#fff}
+  #tstip{position:fixed;pointer-events:none;background:#0f172a;color:#fff;padding:7px 9px;border-radius:6px;font-size:12px;max-width:320px;line-height:1.45;z-index:50;opacity:0;transition:opacity .08s;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+  #tstip b{color:#93c5fd}
+</style>
+</head>
+<body>
+<h1>DeepSeek-V4-Pro trên Alveo U250 — hoạt động 1 chip, 8 layer (slice 1/4 card: 32 head · 96 expert)</h1>
+<p class="meta">Bấm vào từng khối để xem chức năng · đầu vào/đầu ra · DSP · TOPS · workload GOP · throughput. Dùng nút ◀ ▶ để đi từng bước của một layer, lặp 8 layer. Số liệu theo <i>DeepSeek_V4Pro_SingleChip_U250_Microarchitecture.md</i> (prefill chunk-256, batch B=8 = 2.048 token, DSP và URAM @500 MHz — trần URAM của XCU250-2L ở 0,72 V, DDR 65,3 GB/s hiệu dụng; lưu lượng gồm scale MXFP4, residual X/X′ và tích luỹ y).</p>
+<div class="kpis">
+  <div class="kpi"><b>66,9 ms</b>chu kỳ 1 layer (DDR-bound)</div>
+  <div class="kpi"><b>535 ms</b>1 stage = 8 layer / batch-8</div>
+  <div class="kpi"><b>3.828 tok/s</b>prefill throughput / chip</div>
+  <div class="kpi"><b>12.288 DSP</b>24,6 TOPS INT8 @500 MHz</div>
+  <div class="kpi"><b>66%</b>MAC utilization toàn chip</div>
+  <div class="kpi"><b>1.093 GOP</b>workload / layer / batch-8</div>
+</div>
+
+<div class="wrap">
+<div class="left">
+  <div class="legend">
+    <span><i class="sw" style="background:var(--compute)"></i>compute (MAC/DSP)</span>
+    <span><i class="sw" style="background:var(--buffer)"></i>buffer (URAM/BRAM)</span>
+    <span><i class="sw" style="background:var(--memory)"></i>memory (DDR4)</span>
+    <span><i class="sw" style="background:var(--control)"></i>control / DMA / I-O</span>
+    <span><i class="sw" style="background:#fef3c7;border-color:var(--hl)"></i>đang hoạt động (theo bước)</span>
+  </div>
+  <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+
+  <div class="steps">
+    <h2>Trình tự một layer (prefill, batch B=8) — lặp 8 layer</h2>
+    <div class="stepbar">
+      <button id="btnPrev">◀ Trước</button>
+      <button id="btnNext">Sau ▶</button>
+      <button id="btnPlay" class="play">▶ Tự chạy</button>
+      <button id="btnReset">↺ Về đầu</button>
+      <span class="lyr" id="lyrTag">Layer 1/8</span>
+      <span class="lyr" id="timeTag" style="background:#f0fdf4">t ≈ 0 ms</span>
+    </div>
+    <div id="stepdesc"></div>
+    <div class="steplist" id="steplist"></div>
+    <p class="note">Các FU của FRONT pipeline theo tile (BLOCK_M=64) nên thời gian tường (wall-time) của FRONT ≈ 38,8 ms, không phải tổng C-time từng FU; tổng lưu lượng DDR quyết định chu kỳ 66,9 ms. ICI và PCIe chồng lấn dưới ECA stream, không nằm trên đường găng.</p>
+  </div>
+
+  <div class="wfbox">
+    <h2>Waveform — <span id="wfTitle">ECA</span> (full 1 sequence inference qua stage này)</h2>
+    <svg id="wf" xmlns="http://www.w3.org/2000/svg"></svg>
+    <p class="note" id="wfNote">Trục thời gian PHI TUYẾN: mỗi đoạn co giãn theo nhãn thời lượng (X in 8,8 ms → prefill L1…L8 mỗi layer 66,9 ms → 2 token decode 21,1 ms/stage → X′ out). TVALID vẽ mức burst (không vẽ từng beat); thứ tự FU trong một layer vẽ tuần tự theo dòng 1 sequence — trong steady-state FRONT∥ECA chồng lấn 2 batch như Gantt bên dưới. Bấm khối khác trên sơ đồ để đổi waveform.</p>
+  </div>
+
+  <div class="wfbox">
+    <h2>Waveform dataflow → phần cứng — 1 layer, 1 chip (prefill batch B=8)</h2>
+    <p class="meta">Trục ngang = 9 phép toán của dataflow phần mềm (trục PHI TUYẾN — op8 chiếm 97% chu kỳ thật); mỗi hàng = một khối phần cứng. Ô màu: <b style="color:#2563eb">đọc</b> · <b style="color:#7c3aed">tính</b> · <b style="color:#16a34a">ghi</b>, kèm số liệu (weight tính /layer; activation tính /batch-8 = 2.048 token). Hover vào ô để xem chi tiết.</p>
+    <svg id="dfwf" xmlns="http://www.w3.org/2000/svg"></svg>
+    <p class="note">Pipeline nhìn thấy trên waveform: (i) hàng <b>mSGDMA RD DDR4</b> luôn đi TRƯỚC hàng <b>WTB→FU</b> một phép toán (EWD prefetch — nạp weight của op kế trong khi op hiện tại đang tính); (ii) hai thanh trên cùng: trong lúc ECA (op8) của batch i chiếm DDR, toàn bộ op1–op7 của <b>batch i+1</b> chạy song song trên FRONT; (iii) zoom tile bên dưới: trong MỘT phép toán, R∥C∥W chồng lấn theo tile double-buffer.</p>
+    <h2 style="margin-top:12px">Zoom: pipeline tile bên trong một phép toán (ví dụ op8 — ECA, 68 µs/tile)</h2>
+    <svg id="dfwf2" xmlns="http://www.w3.org/2000/svg"></svg>
+    <p class="note">Tile i: mSGDMA ghi WTB bank B trong khi dequant+MAC đọc bank A (tile i) và kết quả tile i−1 ghi RAB — ba pha R/C/W của ba tile liên tiếp chồng lấn hoàn toàn; MAC không chờ vì load(tile 4 MiB, 68,3 µs) < compute(tile, 75,8 µs) tại B=8.</p>
+  </div>
+
+  <div class="gantt">
+    <h2>Pipeline 2 tầng FRONT ∥ ECA (steady-state, 2 chu kỳ layer liên tiếp)</h2>
+    <svg id="gantt" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--act-c)"></i>compute</span>
+      <span><i class="sw" style="background:var(--act-r)"></i>read (DDR/link)</span>
+      <span><i class="sw" style="background:var(--act-w)"></i>write</span>
+      <span><i class="sw" style="background:var(--act-i)"></i>idle/chờ</span>
+    </div>
+    <p class="note">FRONT xử lý batch (i+1) trong khi ECA còn stream weight cho batch (i): một lần stream 3,40 GB phục vụ cả 8 chunk. Hover vào ô để xem số liệu.</p>
+  </div>
+
+  <div class="gantt">
+    <h2>Time–space (trục X = thời gian · trục Y = FU) — mức layer</h2>
+    <p class="meta" id="ts1meta"></p>
+    <div id="ts1"></div>
+    <p class="note">Bấm hàng nhóm (nền tím nhạt) để thu gọn/mở rộng FRONT · ECA · Memory/IO; ô gộp hợp nhất hành động các FU con (sọc = mixed). Hover xem GOPS hoặc bytes + tensor. FRONT làm batch (i+1) trong khi ECA grind batch (i); ô xám = FU chờ chu kỳ DDR.</p>
+    <h2 style="margin-top:14px">Time–space — mức tile: ECA double-buffer WTB (ping-pong)</h2>
+    <p class="meta" id="ts2meta"></p>
+    <div id="ts2"></div>
+    <p class="note">Mỗi cột = 1 tile 4 MiB = 68,3 µs nạp; mSGDMA ghi nửa đối diện trong khi ECA MAC đọc nửa hiện tại — load(tile) 68,3 µs < compute(tile) 75,8 µs tại B=8 nên MAC không chờ giữa các tile (~763 tile/layer).</p>
+  </div>
+  <div id="tstip"></div>
+
+</div>
+
+<div class="panel" id="panel"></div>
+</div>
+
+<script>
+/* ================= DATA: khối + đường nối (chuẩn hw-diagram, routing góc vuông) ============ */
+const DIAGRAM = {
+  width: 1240, height: 520,
+  blocks: [
+    // buffer (hàng trên)
+    {id:"rab",  type:"buffer", x:40,  y:40,  w:260, h:80, title:"RAB",
+     spec:["16 MiB · 512 URAM · 4×16 bank","h 14 MiB thường trú + tile M=8"]},
+    {id:"kvb",  type:"buffer", x:470, y:40,  w:170, h:80, title:"KVB",
+     spec:["8 MiB · 256 URAM · 4×8 bank","top-k 1024 · chia theo mục KV"]},
+    {id:"psa",  type:"buffer", x:700, y:40,  w:150, h:80, title:"PSA",
+     spec:["6 MiB · 192 URAM · 4×8 bank","top-k 18 b · partial"]},
+    // FU chain (hàng giữa)
+    {id:"mhce", type:"compute", x:40,   y:200, w:100, h:110, title:"mHCE",
+     spec:["40 DSP · 0,08 TOPS","RMSNorm + mix","3 pass/layer"]},
+    {id:"acu",  type:"compute", x:180,  y:200, w:100, h:110, title:"ACU",
+     spec:["768 DSP","1,54 TOPS","KV-compress"]},
+    {id:"liu",  type:"compute", x:320,  y:200, w:100, h:110, title:"LIU/HCA",
+     spec:["1.280 DSP","2,56 TOPS","Top-k 1024"]},
+    {id:"qcau", type:"compute", x:460,  y:200, w:120, h:110, title:"QCAU",
+     spec:["3.328 DSP","6,66 TOPS","MQA 32 head"]},
+    {id:"gopu", type:"compute", x:620,  y:200, w:120, h:110, title:"GOPU",
+     spec:["2.432 DSP","4,86 TOPS","proj 4 group"]},
+    {id:"mru",  type:"compute", x:780,  y:200, w:100, h:110, title:"MRU",
+     spec:["128 DSP","0,26 TOPS","router Top-6"]},
+    {id:"ici",  type:"control", x:920,  y:200, w:100, h:110, title:"ICI",
+     spec:["ring 4 card","2×100 GbE","AR · A2A"]},
+    {id:"eca",  type:"compute", x:1060, y:200, w:140, h:110, title:"ECA",
+     spec:["4.096 DSP · 8,19 TOPS","96 expert · SwiGLU","4 sub-array × SLR"]},
+    // hàng dưới: I/O + weight path
+    {id:"pcie", type:"control", x:40,  y:400, w:170, h:90, title:"PCIe ×16 (XDMA)",
+     spec:["13 GB/s hiệu dụng","X in/out · boot weight"]},
+    {id:"wtb",  type:"buffer",  x:300, y:400, w:150, h:90, title:"WTB",
+     spec:["8 MiB = 4×(2×1 MiB) · 256 URAM","tile 4 MiB · 68 µs"]},
+    {id:"dma",  type:"control", x:510, y:400, w:150, h:90, title:"MIG + mSGDMA ×4",
+     spec:["AXI4 512b @300 MHz","1 engine / SLR"]},
+    {id:"ddr",  type:"memory",  x:720, y:400, w:170, h:90, title:"DDR4 ×4 kênh",
+     spec:["64 GB DDR4-2400","77 GB/s (65,3 eff)"]},
+    {id:"qsfp", type:"control", x:950, y:400, w:150, h:90, title:"QSFP28 ×2",
+     spec:["2×100 GbE","ring 4 card / stage"]}
+  ],
+  wires: [
+    {id:"c1", from:"mhce:E", to:"acu:W"},
+    {id:"c2", from:"acu:E",  to:"liu:W"},
+    {id:"c3", from:"liu:E",  to:"qcau:W"},
+    {id:"c4", from:"qcau:E", to:"gopu:W"},
+    {id:"c5", from:"gopu:E", to:"mru:W"},
+    {id:"c6", from:"mru:E",  to:"ici:W"},
+    {id:"c7", from:"ici:E",  to:"eca:W"},
+    {id:"loop", from:"eca:N:0.5", to:"mhce:W:0.5"},          // X' quay lại layer kế
+    {id:"rab_x",  from:"rab:S:0.15", to:"mhce:N:0.3", bits:1024},
+    {id:"rab_x2", from:"mhce:N:0.7", to:"rab:S:0.27", bits:1024},
+    {id:"acu_kvb", from:"acu:N:0.5", to:"kvb:W:0.5", bits:1024},
+    {id:"kvb_qcau", from:"kvb:S:0.5", to:"qcau:N:0.5", bits:1024},
+    {id:"liu_psa", from:"liu:N:0.5", to:"psa:W:0.4", bits:1024},
+    {id:"mru_psa", from:"mru:N:0.5", to:"psa:S:0.75", bits:1024},
+    {id:"ddr_dma", from:"ddr:W", to:"dma:E", bits:512},
+    {id:"dma_wtb", from:"dma:W", to:"wtb:E", bits:512},
+    {id:"wtb_acu",  from:"wtb:N:0.15", to:"acu:S:0.6",  bits:2048},
+    {id:"wtb_liu",  from:"wtb:N:0.35", to:"liu:S:0.6",  bits:2048},
+    {id:"wtb_qcau", from:"wtb:N:0.6",  to:"qcau:S:0.5", bits:2048},
+    {id:"wtb_gopu", from:"wtb:N:0.85", to:"gopu:S:0.5", bits:2048},
+    {id:"wtb_eca",  from:"wtb:E:0.75", to:"eca:S:0.5",  bits:2048},
+    {id:"qsfp_ici", from:"qsfp:N:0.5", to:"ici:S:0.5"},
+    {id:"pcie_rab", from:"pcie:W", to:"rab:W", bits:512}
+  ]
+};
+
+/* ================= DATA: thông tin chi tiết từng khối ============ */
+/* Quy ước: gop1 = GOP/chunk-256 (B=1); gop8 = GOP/batch-8; ct = C-time B=8 (ms);
+   tput = throughput đạt trong cửa sổ hoạt động; util = % chu kỳ layer 66,9 ms */
+const INFO = {
+mhce:{name:"mHCE — Hyper-Connection Engine", cls:"compute",
+ func:"RMSNorm; sinh hệ số A, B, C (mHC n_hc=4); Sinkhorn–Knopp 20 vòng; trộn residual X ← B·X + C·F. Chạy 3 pass mỗi layer: (1) chuẩn hoá đầu layer, (2) cộng ô sau attention, (3) cộng y sau MoE → X′.",
+ inputs:[["X residual","4×7168×256/chunk · BF16 ≈ 14,7 MB","RAB"],["ô (pass 2) / y (pass 3)","3,7 MB/chunk · BF16","RAB (sau all-reduce / combine)"],["γ, mHC static","<1 KB","register on-chip"]],
+ outputs:[["X chuẩn hoá / X′","14,7 MB/chunk","RAB (X′ → layer kế; sau layer 8 → PCIe)"]],
+ dsp:40, peak:"0,096 TOPS", gop1:0.4, gop8:3.2, ct:33.3,
+ tput:"96 GOPS (≈100% peak trong cửa sổ)", util:"66% chu kỳ (ẩn trong pipeline FRONT)",
+ note:"FU nhẹ nhất — giữ 40 DSP; có thể dồn sang LUT logic nếu cần dự phòng DSP."},
+acu:{name:"ACU — Attention Compression Unit", cls:"compute",
+ func:"KV-compress: chiếu X qua W_aKV/W_bKV/W_aZ/W_bZ (4×d×c) + softmax → latent C^Comp; append KV mới vào DDR4.",
+ inputs:[["X","14,7 MB/chunk","RAB"],["W_aKV/bKV/aZ/bZ","14,7 MB FP8/layer","WTB ← DDR4 (0,23 ms)"]],
+ outputs:[["C^Comp (KV nén)","576 B/token → 1,2 MB/batch-8","KVB"],["KV append","~37 KB/layer/chunk","DDR4 (ghi)"]],
+ dsp:768, peak:"1,54 TOPS", gop1:7.5, gop8:60, ct:32.6,
+ tput:"1,54 TOPS (≈100% peak trong cửa sổ)", util:"58% chu kỳ",
+ note:"Replicated trên 4 card của stage (MQA — KV dùng chung mọi head)."},
+liu:{name:"LIU / HCA — Lightning Indexer", cls:"compute",
+ func:"Layer CSA (lẻ): tính index-score FP4 (W_DQ, W_IUQ, W_w) rồi chọn Top-k = 1024 KV cho mỗi query. Layer HCA (chẵn): cluster m′ = 128. Sau đó nạp KV được chọn từ DDR về KVB.",
+ inputs:[["X / c_Q","14,7 MB","RAB"],["W_DQ (FP8) + W_IUQ/W_w (FP4)","17,5 MB/layer","WTB ← DDR4 (0,27 ms)"],["idx-key lịch sử","theo context","DDR4"]],
+ outputs:[["Chỉ số Top-k 1024","4 KB/token","PSA"],["KV top-k nạp về","576 B×1024/query","KVB"]],
+ dsp:1280, peak:"2,56 TOPS", gop1:12.3, gop8:98.4, ct:32.0,
+ tput:"2,56 TOPS (≈100% peak trong cửa sổ)", util:"58% chu kỳ",
+ note:"Top-k sort dùng bitonic network trên LUT, không tốn DSP MAC."},
+qcau:{name:"QCAU — Query-Core Attention Unit", cls:"compute",
+ func:"Sinh q = c_Q·W_UQ cho 32 head (slice TP 1/4); RoPE; core MQA q·K^T → softmax → ·V trên KV top-k; attention sink z′_h.",
+ inputs:[["c_Q","1536×256 FP8 ≈ 0,4 MB","RAB"],["W_UQ slice 32 head","25 MB FP8/layer","WTB ← DDR4 (0,38 ms)"],["KV top-k + SW","≤16 MB working set","KVB"]],
+ outputs:[["o (attention out, 32 head)","32×512×256 BF16 ≈ 8,4 MB","RAB"]],
+ dsp:3328, peak:"6,66 TOPS", gop1:32.2, gop8:257.6, ct:32.3,
+ tput:"6,66 TOPS (≈100% peak trong cửa sổ)", util:"58% chu kỳ",
+ note:"FU lớn nhất của FRONT (42% DSP FRONT) — chia 8 head/SLR, partial cộng nội chip."},
+gopu:{name:"GOPU — Grouped Output Projection Unit", cls:"compute",
+ func:"Chiếu output theo 4/16 group: W_OG ×4 rồi W_O slice (chia HÀNG) → partial ô; partial được all-reduce (cộng) qua ICI với 3 card còn lại.",
+ inputs:[["o","8,4 MB","RAB"],["W_OG 16,8 + W_O 29,4 MB","46,1 MB FP8/layer","WTB ← DDR4 (0,71 ms)"]],
+ outputs:[["partial ô","7168×256 BF16 ≈ 3,7 MB/chunk","RAB → ICI all-reduce"]],
+ dsp:2432, peak:"4,86 TOPS", gop1:23.6, gop8:188.8, ct:32.3,
+ tput:"4,86 TOPS (≈100% peak trong cửa sổ)", util:"58% chu kỳ",
+ note:"Vì W_O chia hàng (contraction bị chia) nên bắt buộc all-reduce; W_UQ chia cột thì không."},
+mru:{name:"MRU — MoE Router Unit", cls:"compute",
+ func:"X·W_router (385 expert) → Sqrt-Softplus → chọn Top-6 routed + 1 shared → softmax gating; sinh danh sách (token, expert) cho dispatch.",
+ inputs:[["X","14,7 MB","RAB"],["W_router + bias","7168×385 FP8 ≈ 2,8 MB","WTB"]],
+ outputs:[["Top-6 index + gate","28 B/token → 57 KB/batch-8","PSA"]],
+ dsp:128, peak:"0,26 TOPS", gop1:1.4, gop8:11.2, ct:36.5,
+ tput:"0,26 TOPS", util:"73% chu kỳ — NGOÀI đường găng (chồng lấn ICI dispatch)",
+ note:"Router replicate trên 4 card → kết quả Top-6 giống nhau, không cần đồng bộ."},
+ici:{name:"ICI — Inter-Card Interconnect (điều khiển)", cls:"control",
+ func:"Đồng bộ 4 card trong stage qua ring 2×QSFP28: (a) all-reduce ô sau GOPU; (b) all-to-all dispatch token h tới card giữ expert; (c) all-to-all combine y về home-card. Gộp EWD prefetch + DMA control (216 DSP cho control, không MAC).",
+ inputs:[["partial ô","5,5 MB/chunk (ring 2×¾)","RAB"],["h dispatch","8,3 MB/chunk ra ngoài","RAB"],["y_e từ card khác","8,3 MB/chunk","QSFP28"]],
+ outputs:[["ô tổng (sau AR)","3,7 MB/chunk","RAB"],["y combine","3,7 MB/chunk","RAB"]],
+ dsp:216, peak:"— (control)", gop1:0, gop8:0, ct:14.1,
+ tput:"12,5 GB/s × 2 cổng; AR 3,5 ms + A2A 10,6 ms (B=8)",
+ util:"28% chu kỳ — chồng lấn hoàn toàn dưới ECA stream",
+ note:"Giao thức gói 32 B header theo InterCard_Protocol; đóng trên Aurora/RoCE-lite."},
+eca:{name:"ECA — Expert Compute Array", cls:"compute",
+ func:"SwiGLU cho 96 expert slice: y = W_down·(SiLU(W_gate·h) ⊙ W_up·h); weight FP4 stream từ DDR4 (không cache); batch B=8 chunk dùng chung MỘT lần stream; 4 sub-array 1.024 DSP, mỗi sub-array bám 1 kênh DDR + 1 SLR (24 expert).",
+ inputs:[["token h sau dispatch","7 KB/token FP8 · ~12,3 MB/batch","RAB"],["expert weight 97×33 MB + scale E8M0","3,40 GB FP4/layer","WTB ← DDR4 4 kênh (52,4 ms)"]],
+ outputs:[["y_e","7 KB/token → ~12,3 MB/batch","RAB → ICI combine"]],
+ dsp:4096, peak:"8,19 TOPS", gop1:59.2, gop8:473.6, ct:57.8,
+ tput:"8,2 TOPS đạt (86% chu kỳ) — NÚT CỔ CHAI của toàn chip",
+ util:"86% chu kỳ — quyết định đường găng (57,8/66,9 ms)",
+ note:"Compute 57,8 ms tại B=8, đọc weight expert 52,4 ms, chu kỳ layer 66,9 ms do tổng lưu lượng DDR. Ràng buộc B nay là dung lượng RAB (h thường trú 1,75 MiB/chunk), không phải MAC."},
+rab:{name:"RAB — Row Activation Buffer", cls:"buffer",
+ func:"Buffer activation trung tâm cho B=8 chunk, xử lý theo tile BLOCK_M=64 (4 tile/chunk). Chứa X, q, o, ô, h, y sống theo chunk; nhận X vào từ PCIe (stage trước) và trả X′ ra sau layer 8.",
+ inputs:[["X từ stage trước","115 MB/batch-8","PCIe (8,8 ms, chồng lấn)"],["Kết quả FU","o, ô, h, y","các FU"]],
+ outputs:[["Operand cho FU","theo tile M=64","mọi FU qua AGU + arbiter"],["X′ sau layer 8","115 MB/batch-8","PCIe → stage kế"]],
+ cap:"16 MiB dữ liệu · 512 URAM · 4 lane × 16 bank × 8 URAM", bw:"256 GB/s đọc @500 MHz · bus 1.024b/lane (64 GB/s/lane)",
+ note:"Port A = FU đọc (AGU), port B = DMA ghi — ping-pong double-buffer."},
+kvb:{name:"KVB — KV Buffer", cls:"buffer",
+ func:"Giữ KV 'nóng': KV top-k 1024 do LIU chọn + sliding window; nhận C^Comp mới từ ACU trước khi append về DDR4.",
+ inputs:[["KV top-k","576 B × 1024/query","DDR4 (qua DMA)"],["C^Comp mới","1,2 MB/batch","ACU"]],
+ outputs:[["KV cho core MQA","theo head slice","QCAU"]],
+ cap:"8 MiB dữ liệu · 256 URAM · 4 lane × 8 bank × 8 URAM (chia theo mục KV)", bw:"128 GB/s đọc @500 MHz · bus 512b/lane",
+ note:"Tăng 12→16 MB so với Agilex nhờ WTB thu nhỏ — giảm re-fetch KV qua DDR chậm."},
+psa:{name:"PSA — Partial-Sum & Scratch Array", cls:"buffer",
+ func:"Scratch cho ∑K partial của softmax, chỉ số Top-k của LIU, kết quả router Top-6 + gate của MRU.",
+ inputs:[["Top-k index","4 KB/token","LIU"],["Top-6 + gate","57 KB/batch","MRU"]],
+ outputs:[["Danh sách dispatch","(token, expert, gate)","ICI / ECA"]],
+ cap:"6 MiB dữ liệu · 192 URAM · 4 lane × 8 bank × 6 URAM", bw:"128 GB/s @500 MHz · bus 512b/lane",
+ note:"Accumulator MAC nằm trong register file của mảng DSP, ngoài PSA."},
+wtb:{name:"WTB — Weight Tile Buffer", cls:"buffer",
+ func:"Double-buffer weight tile: DMA ghi nửa B trong khi FU đọc nửa A (ping-pong). Weight KHÔNG được cache — chỉ chảy qua. Tile 4 MiB (1 MiB/kênh DDR) nạp trong 68,3 µs, dưới thời gian ECA compute 1 tile (75,8 µs) tại B=8.",
+ inputs:[["Weight tile","4 MB/tile · ~810 tile/layer","DDR4 qua 4 DMA"]],
+ outputs:[["Weight đã dequant FP4→INT8","2.048b/lane/cycle","ACU/LIU/QCAU/GOPU/MRU/ECA"]],
+ cap:"8 MiB dữ liệu = 4 lane × 2 × 1 MiB · 256 URAM (32 bank/nửa)", bw:"128 GB/s/lane đọc (512 tổng) @500 MHz · nạp 16,3 GB/s/kênh",
+ note:"Từ URAM 72 b = 64 b dữ liệu + 8 b scale E8M0 (khối 32); 32 URAM chứa đúng 1 MiB nên một nửa tile của một lane là 32 khối."},
+ddr:{name:"DDR4 — bộ nhớ ngoài 4 kênh", cls:"memory",
+ func:"Giữ toàn bộ trạng thái bền vững của chip: weight slice 8 layer (~25 GB), KV cache (~4,6 GB/1M-token seq), embed/head (stage 0/7). Weight stripe đều 4 kênh theo tile 1 MB — mỗi kênh phục vụ 1 SLR.",
+ inputs:[["Weight lúc boot","25 GB một lần","PCIe (1,9 s)"],["KV append","37 KB/layer/chunk","ACU"]],
+ outputs:[["Weight stream","3,51 GB/layer (expert 3,40 + attn 0,11)","WTB"],["Residual X/X′ + tích luỹ y","0,82 GB/layer","RAB / DDR4"],["KV top-k","theo LIU","KVB"]],
+ cap:"64 GB (4×16 GB DIMM 2400 MT/s) — dùng 39%", bw:"77 GB/s peak · 65,3 GB/s hiệu dụng (85%)",
+ note:"NÚT CỔ CHAI HỆ THỐNG: chu kỳ layer = 4,37 GB ÷ 65,3 GB/s = 66,9 ms (expert 3,40 + attention 0,11 + residual X/X′ 0,47 + tích luỹ y 0,35 + KV 0,04 GB)."},
+dma:{name:"MIG + mSGDMA — 4 engine DMA", cls:"control",
+ func:"4 DDR4 controller (MIG) + 4 scatter-gather DMA độc lập, mỗi engine phục vụ 1 SLR; descriptor do Ctrl phát; prefetch weight FU kế (EWD) khi FU hiện tại đang compute.",
+ inputs:[["Lệnh descriptor","—","Ctrl/CtxQ"],["Dữ liệu DDR","512b @300 MHz/kênh","DDR4"]],
+ outputs:[["Ghi port B buffer","19,2 GB/s/kênh","WTB · KVB · RAB"]],
+ cap:"—", bw:"4 × 19,2 GB/s = 76,8 GB/s tổng",
+ note:"Không có NoC cứng như Agilex — mọi đường 512b được floorplan tay trong SLR."},
+pcie:{name:"PCIe Gen3 ×16 — XDMA shell", cls:"control",
+ func:"(1) Boot: nạp 25 GB weight vào DDR4 (~1,9 s). (2) Mỗi batch: nhận X từ stage trước qua host, trả X′ sau layer 8. (3) Điều phối scheduler continuous batching từ host.",
+ inputs:[["X residual vào","56 KB/token → 115 MB/batch-8","host (stage trước)"]],
+ outputs:[["X′ ra","115 MB/batch-8 · 8,8 ms","host (stage kế)"]],
+ cap:"shell tĩnh tại SLR1", bw:"~13 GB/s hiệu dụng",
+ note:"8,8 ms truyền chồng lấn dưới 535 ms/stage (1,6%) — không cần link quang riêng giữa stage."},
+qsfp:{name:"QSFP28 ×2 — 100 GbE ring", cls:"control",
+ func:"Vật lý của ICI: mỗi card nối 2 láng giềng thành ring 4 card trong stage. Mang all-reduce ô và all-to-all dispatch/combine.",
+ inputs:[["Gói ICI từ 3 card","header 32 B + payload","ring"]],
+ outputs:[["Gói ICI đi","12,5 GB/s/hướng/cổng","ring"]],
+ cap:"2 cổng · ring 4 nút", bw:"2 × 12,5 GB/s",
+ note:"Tổng lưu lượng ICI/layer (B=8): AR 44 MB + A2A 133 MB → 14,1 ms, ẩn dưới 66,9 ms."}
+};
+
+/* ================= DATA: các bước của một layer ============ */
+const STEPS = [
+ {t:"0 · Nạp X vào chip", blocks:["pcie","rab"], wires:["pcie_rab"], dt:0,
+  d:"X residual của batch-8 (115 MB BF16) từ stage trước tới qua PCIe/host, DMA ghi vào RAB. Chồng lấn với batch trước — không tính vào chu kỳ layer. (Chỉ xảy ra 1 lần/batch, trước layer đầu của stage.)"},
+ {t:"1 · mHCE — chuẩn hoá", blocks:["mhce","rab"], wires:["rab_x"], dt:3.7,
+  d:"mHCE đọc X từ RAB (theo tile M=64), RMSNorm + sinh A,B,C + Sinkhorn-Knopp, ghi X chuẩn hoá lại RAB. Workload 3,2 GOP (B=8) trên 40 DSP."},
+ {t:"2 · ACU — nén KV", blocks:["acu","wtb","kvb","ddr","dma"], wires:["c1","wtb_acu","acu_kvb","ddr_dma","dma_wtb"], dt:4.1,
+  d:"ACU đọc 14,7 MB weight (WTB←DDR, 0,23 ms) + X, tính C^Comp cho 2.048 token → ghi KVB; append KV mới (~37 KB) về DDR4. 60 GOP trên 768 DSP."},
+ {t:"3 · LIU — chọn Top-k", blocks:["liu","wtb","psa","kvb"], wires:["c2","wtb_liu","liu_psa"], dt:4.0,
+  d:"Lightning Indexer (FP4) chấm điểm KV lịch sử, chọn Top-k=1024/query → PSA; nạp KV được chọn từ DDR về KVB. 98,4 GOP trên 1.280 DSP."},
+ {t:"4 · QCAU — core attention", blocks:["qcau","wtb","kvb"], wires:["c3","wtb_qcau","kvb_qcau"], dt:8.1,
+  d:"q = c_Q·W_UQ (32 head slice) + RoPE; MQA trên KV top-k trong KVB; attention sink → o ghi RAB. 257,6 GOP trên 3.328 DSP — FU lớn nhất FRONT."},
+ {t:"5 · GOPU — output proj", blocks:["gopu","wtb","rab"], wires:["c4","wtb_gopu"], dt:8.1,
+  d:"W_OG ×4 group + W_O slice (chia hàng) → partial ô (3,7 MB/chunk) ghi RAB. 188,8 GOP trên 2.432 DSP."},
+ {t:"6 · ICI — all-reduce ô", blocks:["ici","qsfp"], wires:["qsfp_ici"], dt:0,
+  d:"Cộng partial ô của 4 card qua ring QSFP28: 5,5 MB/chunk × 8 = 3,5 ms — chồng lấn dưới ECA stream của batch trước, không cộng vào chu kỳ."},
+ {t:"7 · mHCE — cộng residual ô", blocks:["mhce","rab"], wires:["rab_x"], dt:3.7,
+  d:"X ← B·X + C·ô (pass 2 của mHCE)."},
+ {t:"8 · MRU — router Top-6", blocks:["mru","psa","wtb"], wires:["c5","mru_psa"], dt:0,
+  d:"X·W_router → Sqrt-Softplus → Top-6 + gate → PSA. 11,2 GOP trên 128 DSP; 36,5 ms nhưng chồng lấn ICI dispatch — ngoài đường găng."},
+ {t:"9 · ICI — dispatch token", blocks:["ici","qsfp","psa"], wires:["c6","qsfp_ici"], dt:0,
+  d:"All-to-all: gửi token h (7 KB FP8) tới card giữ expert đích; nhận token của card khác. 8,3 MB/chunk × 8 → 5,3 ms, chồng lấn."},
+ {t:"10 · ECA — SwiGLU 96 expert", blocks:["eca","wtb","ddr","dma"], wires:["c7","wtb_eca","ddr_dma","dma_wtb"], dt:48.2,
+  d:"NÚT CỔ CHAI: stream 3,40 GB expert weight từ DDR4 4 kênh (52,4 ms) qua WTB tile 4 MiB; 4 sub-array 1.024 DSP tính SwiGLU cho cả 8 chunk trên MỘT lần stream (473,6 GOP, 57,8 ms @500 MHz)."},
+ {t:"11 · ICI — combine y", blocks:["ici","qsfp"], wires:["qsfp_ici"], dt:0,
+  d:"All-to-all ngược: y_e về home-card, cộng có trọng số gate 6 expert + shared. 5,3 ms, chồng lấn."},
+ {t:"12 · mHCE — X′, sang layer kế", blocks:["mhce","rab","eca"], wires:["loop","rab_x2"], dt:3.7,
+  d:"X′ = B·X + C·y (pass 3). Nếu chưa hết 8 layer: quay lại bước 1 với bộ weight layer kế (đã được EWD prefetch). Chu kỳ thực tế/layer = 66,9 ms do FRONT pipeline tile ẩn dưới ECA."},
+ {t:"13 · Xuất X′ sau layer 8", blocks:["rab","pcie"], wires:["pcie_rab"], dt:0,
+  d:"Sau layer thứ 8: X′ (115 MB) rời chip qua PCIe → host → stage kế. Tổng 1 stage = 8 × 66,9 ≈ 535 ms/batch-8 → 3.828 tok/s prefill."}
+];
+
+
+/* ================= PORTS: tín hiệu bus từng khối (theo FU_Interface_Spec) ============ */
+/* w=TDATA width (bit); clk MHz; bw=GB/s hiệu dụng = w×clk/8; pr=protocol */
+const PORTS={
+mhce:[{n:"s_axis_x",d:"in",w:1024,clk:500,bus:"RA-bus",t:"X_l / X′ + F(ô·y) BF16",pr:"AXI4-Stream"},
+      {n:"s_axis_w",d:"in",w:2048,clk:500,bus:"WT-bus",t:"W_pre/res/post FP8",pr:"AXI4-Stream"},
+      {n:"m_axis_xn",d:"out",w:1024,clk:500,bus:"RA-bus",t:"X̂ FP8",pr:"AXI4-Stream"},
+      {n:"m_axis_x",d:"out",w:1024,clk:500,bus:"RA-bus",t:"X′ BF16",pr:"AXI4-Stream"}],
+acu:[{n:"s_axis_xn",d:"in",w:1024,clk:500,bus:"RA-bus",t:"X̂ FP8",pr:"AXI4-Stream"},
+     {n:"s_axis_w",d:"in",w:2048,clk:500,bus:"WT-bus",t:"W_aKV/bKV/aZ/bZ FP8",pr:"AXI4-Stream"},
+     {n:"m_axis_kv",d:"out",w:2048,clk:500,bus:"KV-bus",t:"C^Comp + K^IComp",pr:"AXI4-Stream"},
+     {n:"m_axi_ddr",d:"out",w:512,clk:300,bus:"AXI4-MM",t:"KV append",pr:"AXI4 burst"}],
+liu:[{n:"s_axis_xn",d:"in",w:1024,clk:500,bus:"RA-bus",t:"X̂ FP8",pr:"AXI4-Stream"},
+     {n:"s_axis_w",d:"in",w:2048,clk:500,bus:"WT-bus",t:"W_DQ FP8 · W_IUQ/W_w FP4",pr:"AXI4-Stream"},
+     {n:"s_axis_ik",d:"in",w:2048,clk:500,bus:"KV-bus",t:"K^IComp lịch sử FP4",pr:"AXI4-Stream"},
+     {n:"m_axis_cq",d:"out",w:1024,clk:500,bus:"RA-bus",t:"c_Q FP8",pr:"AXI4-Stream"},
+     {n:"m_axis_topk",d:"out",w:1024,clk:500,bus:"PS-bus",t:"top-k idx INT32",pr:"AXI4-Stream"},
+     {n:"m_desc_fetch",d:"out",w:256,clk:300,bus:"desc",t:"descriptor nạp 𝒞^SprsComp",pr:"mSGDMA desc"}],
+qcau:[{n:"s_axis_cq",d:"in",w:1024,clk:500,bus:"RA-bus",t:"c_Q FP8",pr:"AXI4-Stream"},
+      {n:"s_axis_w",d:"in",w:2048,clk:500,bus:"WT-bus",t:"W_UQ slice 32 head FP8",pr:"AXI4-Stream"},
+      {n:"s_axis_kv",d:"in",w:2048,clk:500,bus:"KV-bus",t:"𝒞^SprsComp + KV_win",pr:"AXI4-Stream"},
+      {n:"m_axis_o",d:"out",w:1024,clk:500,bus:"RA-bus",t:"o BF16 (32 head)",pr:"AXI4-Stream"}],
+gopu:[{n:"s_axis_o",d:"in",w:1024,clk:500,bus:"RA-bus",t:"o^G BF16",pr:"AXI4-Stream"},
+      {n:"s_axis_w",d:"in",w:2048,clk:500,bus:"WT-bus",t:"W_OG ×4 + W_O slice FP8",pr:"AXI4-Stream"},
+      {n:"m_axis_op",d:"out",w:1024,clk:500,bus:"RA-bus",t:"partial ô BF16",pr:"AXI4-Stream"}],
+mru:[{n:"s_axis_xn",d:"in",w:1024,clk:500,bus:"RA-bus",t:"X̂′ FP8",pr:"AXI4-Stream"},
+     {n:"s_axis_w",d:"in",w:2048,clk:500,bus:"WT-bus",t:"W_router FP8",pr:"AXI4-Stream"},
+     {n:"m_axis_rt",d:"out",w:1024,clk:500,bus:"PS-bus",t:"top_idx INT16 + w_top BF16",pr:"AXI4-Stream"}],
+ici:[{n:"s_axis_tx",d:"in",w:1024,clk:500,bus:"RA-bus",t:"ô partial / h / y_e",pr:"AXI4-Stream"},
+     {n:"m_axis_rx",d:"out",w:1024,clk:500,bus:"RA-bus",t:"ô tổng / h remote / y_e về",pr:"AXI4-Stream"},
+     {n:"gt_qsfp[1:0]",d:"io",w:256,clk:322,bus:"QSFP28",t:"khung Aurora 64b/66b, header 32 B",pr:"4×25,78G GTY"}],
+eca:[{n:"s_axis_h",d:"in",w:1024,clk:500,bus:"RA-bus",t:"h token FP8",pr:"AXI4-Stream"},
+     {n:"s_axis_rt",d:"in",w:1024,clk:500,bus:"PS-bus",t:"(token, expert, w_top)",pr:"AXI4-Stream"},
+     {n:"s_axis_w",d:"in",w:2048,clk:500,bus:"WT-bus",t:"W_gate/up/down FP4→INT8",pr:"AXI4-Stream"},
+     {n:"m_axis_y",d:"out",w:1024,clk:500,bus:"RA-bus",t:"y_e FP8",pr:"AXI4-Stream"}],
+rab:[{n:"portA_rd ×16 bank/lane",d:"out",w:1024,clk:500,bus:"URAM",t:"operand → FU (AGU broadcast)",pr:"URAM sync rd"},
+     {n:"portB_wr ×16 bank/lane",d:"in",w:1024,clk:500,bus:"URAM",t:"kết quả FU / DMA / ICI",pr:"URAM sync wr"}],
+kvb:[{n:"portA_rd ×8 bank/lane",d:"out",w:512,clk:500,bus:"URAM",t:"KV → QCAU/LIU",pr:"URAM sync rd"},
+     {n:"portB_wr ×8 bank/lane",d:"in",w:512,clk:500,bus:"URAM",t:"C^Comp mới + fetch DDR",pr:"URAM sync wr"}],
+psa:[{n:"portA_rd ×8 bank/lane",d:"out",w:512,clk:500,bus:"URAM",t:"scratch → FU",pr:"URAM sync rd"},
+     {n:"portB_wr ×8 bank/lane",d:"in",w:512,clk:500,bus:"URAM",t:"top-k 18 b / route / partial",pr:"URAM sync wr"}],
+wtb:[{n:"portA_rd ×32 bank/lane",d:"out",w:2048,clk:500,bus:"URAM",t:"weight tile → dequant → MAC",pr:"URAM sync rd"},
+     {n:"portB_wr (DMA)",d:"in",w:512,clk:300,bus:"AXI4-MM",t:"tile 1 MB/kênh",pr:"mSGDMA wr"}],
+dma:[{n:"m_axi_ddr[3:0]",d:"io",w:512,clk:300,bus:"AXI4-MM",t:"đọc weight/KV · ghi KV append",pr:"AXI4 burst 4 kênh"},
+     {n:"m_axis_wr",d:"out",w:512,clk:300,bus:"portB",t:"→ WTB/KVB/RAB",pr:"AXI4-Stream"}],
+pcie:[{n:"xdma_h2c/c2h",d:"io",w:512,clk:250,bus:"PCIe Gen3×16",t:"X in/out · boot weight",pr:"XDMA AXI4"}],
+qsfp:[{n:"gt_serial[3:0] ×2",d:"io",w:4,clk:25781,bus:"GTY",t:"serial 4×25,78 Gb/s NRZ/cổng",pr:"100GbE/Aurora"},
+      {n:"axis_100g ×2",d:"io",w:512,clk:322,bus:"MAC",t:"khung ICI header 32 B",pr:"AXI4-Stream"}]
+};
+function portsHtml(id){
+  const P=PORTS[id]; if(!P) return "";
+  const rows=P.map(p=>{
+    const bw=p.clk>1000?"":( " · "+String((p.w*p.clk/8000).toFixed(1)).replace(".",",")+" GB/s");
+    const sig=p.pr==="AXI4-Stream"
+      ? `TDATA[${p.w-1}:0] · TVALID/TREADY · TLAST · TUSER[8:0]`
+      : `${p.w} bit`;
+    return `<tr><td>${p.n}<br><span style="color:#94a3b8">${p.d}</span></td>`+
+      `<td>${sig}<br><span style="color:#64748b">${p.pr} · ${p.bus} · ${p.clk>1000?(p.clk/1000+" GHz"):(p.clk+" MHz")}${bw}</span><br><i>${p.t}</i></td></tr>`;
+  }).join("");
+  const ctl = (INFO[id]&&INFO[id].dsp!==undefined)
+    ? `<tr><td>s_axi_lite<br><span style="color:#94a3b8">in</span></td><td>AWADDR/WDATA[31:0]… · AXI4-Lite · 300 MHz<br><i>thanh ghi cấu hình 4 KB</i></td></tr>`+
+      `<tr><td>start / done<br><span style="color:#94a3b8">in/out</span></td><td>1 bit · mức xung, đồng bộ 300 MHz<br><i>handshake với Ctrl sequencer</i></td></tr>`
+    : "";
+  return `<h3>Giao diện tín hiệu</h3><table>${rows}${ctl}</table>`;
+}
+
+/* ================= WAVEFORM: full 1 sequence (X in → L1..L8 → decode ×2 → X′ out) ==== */
+const WFSEG=(()=>{
+  const a=[{id:"XIN",lab:"X in",dur:"8,8 ms",w:56,ty:"x"}];
+  for(let i=1;i<=8;i++)a.push({id:"L"+i,lab:"L"+i,dur:"66,9 ms",w:104,ty:"L"});
+  a.push({id:"D1",lab:"dec t₁",dur:"21,1 ms",w:62,ty:"D"});
+  a.push({id:"D2",lab:"dec t₂",dur:"21,1 ms",w:62,ty:"D"});
+  a.push({id:"XOUT",lab:"X′ out",dur:"8,8 ms",w:56,ty:"x"});
+  return a;
+})();
+/* cửa sổ hoạt động (frac trong 1 layer, vẽ tuần tự theo 1 sequence) */
+const WFACT={
+mhce:{w:[[0,.04]],din:[[0,.05],[.44,.5],[.95,1]],busy:[[.01,.05],[.46,.5],[.96,1]],dout:[[.02,.05],[.48,.5],[.97,1]],dlab:"X"},
+acu:{w:[[.02,.05]],din:[[.05,.14]],busy:[[.05,.14]],dout:[[.09,.14]],dlab:"X̂"},
+liu:{w:[[.09,.14]],din:[[.14,.23]],busy:[[.14,.23]],dout:[[.19,.23]],dlab:"X̂"},
+qcau:{w:[[.19,.23]],din:[[.23,.35]],busy:[[.23,.35]],dout:[[.3,.35]],dlab:"c_Q·KV"},
+gopu:{w:[[.3,.35]],din:[[.35,.44]],busy:[[.35,.44]],dout:[[.4,.44]],dlab:"o"},
+mru:{w:[[.46,.5]],din:[[.5,.53]],busy:[[.5,.53]],dout:[[.52,.53]],dlab:"X̂′"},
+ici:{din:[[.44,.47],[.53,.56],[.95,.97]],busy:[[.44,.47],[.53,.56],[.95,.97]],dout:[[.45,.47],[.55,.56],[.96,.97]],dlab:"ô·h·y"},
+eca:{w:[[.56,.95]],din:[[.56,.62]],busy:[[.57,.95]],dout:[[.88,.95]],dlab:"h"},
+rab:{din:[[0,1]],busy:[],dout:[[0,1]],dlab:"act"},
+kvb:{din:[[.05,.14]],busy:[],dout:[[.14,.35]],dlab:"KV"},
+psa:{din:[[.14,.23],[.5,.53]],busy:[],dout:[[.53,.62]],dlab:"idx"},
+wtb:{din:[[0,1]],busy:[],dout:[[0,.44],[.46,.5],[.56,.95]],dlab:"W"},
+dma:{din:[[0,1]],busy:[[0,1]],dout:[[0,1]],dlab:"DDR"},
+pcie:{xin:true,xout:true,dlab:"X"},
+qsfp:{din:[[.44,.47],[.53,.56],[.95,.97]],busy:[[.44,.47],[.53,.56],[.95,.97]],dout:[[.44,.47],[.53,.56],[.95,.97]],dlab:"pkt"}
+};
+const WFROWDEF=(id)=>{
+  const P=PORTS[id]||[], A=WFACT[id]||{};
+  const rows=[{name:"clk_core 500 MHz",kind:"clk"}];
+  if(INFO[id]&&INFO[id].dsp!==undefined) rows.push({name:"start",kind:"pulse",at:"begin"});
+  const pw=P.find(p=>p.n==="s_axis_w");
+  if(pw&&A.w) rows.push({name:"s_axis_w_tvalid",kind:"bit",iv:A.w},
+                        {name:"s_axis_w_tdata["+(pw.w-1)+":0]",kind:"bus",iv:A.w,lab:"W·"});
+  if(A.din&&A.din.length) rows.push({name:(P[0]?P[0].n:"s_axis_d")+"_tvalid",kind:"bit",iv:A.din},
+                        {name:"…_tdata",kind:"bus",iv:A.din,lab:(A.dlab||"D")+"·"});
+  if(A.busy&&A.busy.length) rows.push({name:"busy_mac",kind:"bit",iv:A.busy});
+  const po=P.find(p=>p.d==="out");
+  if(A.dout&&A.dout.length) rows.push({name:(po?po.n:"m_axis")+"_tvalid",kind:"bit",iv:A.dout});
+  if(INFO[id]&&INFO[id].dsp!==undefined) rows.push({name:"done",kind:"pulse",at:"end"});
+  return rows;
+};
+function renderWave(id){
+  const g=document.getElementById("wf"); if(!g) return;
+  const o=INFO[id]; document.getElementById("wfTitle").textContent=(o?o.name:id);
+  const A=WFACT[id]||{};
+  const LBL=170, H0=34, RH=30;
+  const rows=WFROWDEF(id);
+  const totW=LBL+WFSEG.reduce((a,s)=>a+s.w,0)+20;
+  const totH=H0+rows.length*RH+10;
+  g.setAttribute("viewBox",`0 0 ${totW} ${totH}`);
+  g.setAttribute("width",totW);
+  while(g.firstChild)g.removeChild(g.firstChild);
+  const mk=(tag,at,txt)=>{const e=document.createElementNS(NS,tag);
+    for(const k in at)e.setAttribute(k,at[k]); if(txt!=null)e.textContent=txt; g.appendChild(e); return e;};
+  // header: đoạn thời gian
+  let x=LBL;
+  const segX=[];
+  WFSEG.forEach(sg=>{
+    segX.push({...sg,x0:x,x1:x+sg.w});
+    mk("line",{x1:x,x2:x,y1:6,y2:totH-6,class:"wf-grid"});
+    mk("text",{x:x+sg.w/2,y:14,"text-anchor":"middle",class:"wf-seg"},sg.lab);
+    mk("text",{x:x+sg.w/2,y:25,"text-anchor":"middle",class:"wf-dur"},sg.dur);
+    x+=sg.w;
+  });
+  mk("line",{x1:x,x2:x,y1:6,y2:totH-6,class:"wf-grid"});
+  // cửa sổ hoạt động của 1 segment cho block này
+  const segIv=(sg,kindIv)=>{
+    if(sg.ty==="x"){ // XIN/XOUT: chỉ pcie/rab hoạt động
+      if(id==="pcie"&&((sg.id==="XIN"&&WFACT.pcie.xin)||(sg.id==="XOUT"&&WFACT.pcie.xout)))return [[0.05,0.95]];
+      if(id==="rab"&&(sg.id==="XIN"||sg.id==="XOUT"))return [[0.05,0.95]];
+      return [];
+    }
+    return kindIv||[];
+  };
+  rows.forEach((r,ri)=>{
+    const y=H0+ri*RH, hi=y+4, lo=y+RH-8, mid=(hi+lo)/2;
+    mk("text",{x:4,y:mid+3,class:"wf-sig"},r.name);
+    if(r.kind==="clk"){
+      let d="";
+      for(let cx=LBL;cx<x-4;cx+=6)d+=`M${cx} ${lo} L${cx} ${hi} L${cx+3} ${hi} L${cx+3} ${lo} L${cx+6} ${lo} `;
+      mk("path",{d,class:"wf-bit","stroke-width":0.7,opacity:0.45});
+      return;
+    }
+    // gom interval tuyệt đối
+    let ivs=[];
+    segX.forEach(sg=>{
+      let list=[];
+      if(r.kind==="pulse"){
+        if(sg.ty==="x")list=segIv(sg,null).length?[r.at==="begin"?[0.05,0.08]:[0.92,0.95]]:[];
+        else list=[r.at==="begin"?[0,0.015]:[0.985,1]];
+      } else list=segIv(sg,r.iv);
+      list.forEach(([a,b])=>ivs.push([sg.x0+a*(sg.x1-sg.x0), sg.x0+b*(sg.x1-sg.x0), sg]));
+    });
+    if(r.kind==="bus"){
+      mk("line",{x1:LBL,x2:x,y1:mid,y2:mid,class:"wf-idle"});
+      ivs.forEach(([a,b,sg])=>{
+        const w=b-a; if(w<3)return;
+        mk("path",{d:`M${a} ${mid} L${a+3} ${hi} L${b-3} ${hi} L${b} ${mid} L${b-3} ${lo} L${a+3} ${lo} Z`,class:"wf-bus"});
+        if(w>22)mk("text",{x:(a+b)/2,y:mid+3,"text-anchor":"middle",class:"wf-buslbl"},(r.lab||"")+ (sg.ty==="L"?sg.lab:sg.ty==="D"?"dec":sg.lab));
+      });
+    } else {
+      // bit: đường 0 với các đoạn lên 1
+      ivs.sort((p,q)=>p[0]-q[0]);
+      let d=`M${LBL} ${lo} `, cx=LBL;
+      ivs.forEach(([a,b])=>{
+        if(a>cx)d+=`L${a} ${lo} `;
+        d+=`L${a} ${hi} L${b} ${hi} L${b} ${lo} `;
+        cx=b;
+      });
+      d+=`L${x} ${lo}`;
+      mk("path",{d,class:"wf-bit"});
+    }
+  });
+}
+
+/* ================= RENDER SVG (router A* góc vuông + jump arc) ============ */
+const NS="http://www.w3.org/2000/svg";
+const svg=document.getElementById("svg");
+svg.setAttribute("viewBox",`0 0 ${DIAGRAM.width} ${DIAGRAM.height}`);
+const blk={}; DIAGRAM.blocks.forEach(b=>blk[b.id]=b);
+
+function port(spec){
+  const p=spec.split(":"); const b=blk[p[0]]; const f=p.length>2?parseFloat(p[2]):0.5;
+  switch(p[1]){
+    case "E": return {x:b.x+b.w,   y:b.y+b.h*f, dir:[1,0]};
+    case "W": return {x:b.x,       y:b.y+b.h*f, dir:[-1,0]};
+    case "N": return {x:b.x+b.w*f, y:b.y,       dir:[0,-1]};
+    case "S": return {x:b.x+b.w*f, y:b.y+b.h,   dir:[0,1]};
+  }
+}
+const GRID=10, STUB=20, COST_WALL=1e9, COST_MARGIN=8, COST_WIRE=12, COST_BEND=4, MAX_ITER=8000;
+let GW,GH,grid,wireHeat;
+function initGrid(){
+  GW=Math.ceil(DIAGRAM.width/GRID)+2; GH=Math.ceil(DIAGRAM.height/GRID)+2;
+  grid=new Uint8Array(GW*GH); wireHeat=new Uint8Array(GW*GH);
+  DIAGRAM.blocks.forEach(b=>{
+    const x0=Math.floor(b.x/GRID),y0=Math.floor(b.y/GRID),
+          x1=Math.ceil((b.x+b.w)/GRID),y1=Math.ceil((b.y+b.h)/GRID);
+    for(let gy=y0;gy<=y1;gy++)for(let gx=x0;gx<=x1;gx++)setG(gx,gy,2);
+    for(let gy=y0-1;gy<=y1+1;gy++)for(let gx=x0-1;gx<=x1+1;gx++)if(getG(gx,gy)<2)setG(gx,gy,1);
+  });
+}
+function getG(gx,gy){return(gx<0||gy<0||gx>=GW||gy>=GH)?2:grid[gy*GW+gx];}
+function setG(gx,gy,v){if(gx>=0&&gy>=0&&gx<GW&&gy<GH)grid[gy*GW+gx]=Math.max(grid[gy*GW+gx],v);}
+function heatG(gx,gy){if(gx>=0&&gy>=0&&gx<GW&&gy<GH)wireHeat[gy*GW+gx]++;}
+function getHeat(gx,gy){return(gx<0||gy<0||gx>=GW||gy>=GH)?0:wireHeat[gy*GW+gx];}
+function cellCost(gx,gy){const g=getG(gx,gy); if(g===2)return COST_WALL;
+  return (g===1?COST_MARGIN:1)+getHeat(gx,gy)*COST_WIRE;}
+function snap(px){return Math.round(px/GRID);}
+function astar(sx,sy,ex,ey,startDir){
+  const key=(gx,gy,d)=>gx+GW*gy+(d<<20);
+  const g=new Map(),f=new Map(),from=new Map();const open=[];
+  function push(gx,gy,d,gv,fv,pk){
+    const k=key(gx,gy,d); if(g.has(k)&&g.get(k)<=gv)return;
+    g.set(k,gv);f.set(k,fv);from.set(k,pk);
+    let lo=0,hi=open.length;
+    while(lo<hi){const mid=(lo+hi)>>1;open[mid][0]<fv?lo=mid+1:hi=mid;}
+    open.splice(lo,0,[fv,gx,gy,d,k]);
+  }
+  const h=(gx,gy)=>(Math.abs(gx-ex)+Math.abs(gy-ey))*GRID;
+  push(sx,sy,startDir,0,h(sx,sy),null);
+  let iter=0;
+  while(open.length&&iter++<MAX_ITER){
+    const[,cx,cy,cd,ck]=open.shift();
+    if(cx===ex&&cy===ey){
+      const pts=[[ex*GRID,ey*GRID]];let cur=ck;
+      while(from.get(cur)!==null){
+        cur=from.get(cur);
+        const d2=cur>>20,idx=cur-(d2<<20);
+        pts.push([(idx%GW)*GRID,Math.floor(idx/GW)*GRID]);
+      }
+      pts.reverse();return pts;
+    }
+    for(const[dx,dy,nd]of[[1,0,0],[-1,0,0],[0,1,1],[0,-1,1]]){
+      const nx=cx+dx,ny=cy+dy;const c=cellCost(nx,ny);if(c>=COST_WALL)continue;
+      const bend=(cd!==2&&nd!==cd)?COST_BEND:0;
+      const ng=g.get(ck)+c+bend;
+      push(nx,ny,nd,ng,ng+h(nx,ny),ck);
+    }
+  }
+  return null;
+}
+function routeLZ(p1,p2){
+  const h1=p1.dir[0]!==0,h2=p2.dir[0]!==0;const pts=[[p1.x,p1.y]];
+  if(h1!==h2){if(h1)pts.push([p2.x,p1.y]);else pts.push([p1.x,p2.y]);}
+  else if(h1){const mx=(p1.x+p2.x)/2;pts.push([mx,p1.y],[mx,p2.y]);}
+  else{const my=(p1.y+p2.y)/2;pts.push([p1.x,my],[p2.x,my]);}
+  pts.push([p2.x,p2.y]);return simplify(pts);
+}
+function route(p1,p2){
+  const sx=p1.x+p1.dir[0]*STUB,sy=p1.y+p1.dir[1]*STUB;
+  const ex=p2.x+p2.dir[0]*STUB,ey=p2.y+p2.dir[1]*STUB;
+  const inner=astar(snap(sx),snap(sy),snap(ex),snap(ey),p1.dir[0]!==0?0:1);
+  let pts;
+  if(inner){pts=[[p1.x,p1.y],[sx,sy],...inner,[ex,ey],[p2.x,p2.y]];}
+  else{pts=routeLZ(p1,p2);}
+  pts=simplify(pts);
+  for(let i=0;i<pts.length-1;i++){
+    const[ax,ay]=pts[i],[bx,by]=pts[i+1];
+    if(ax===bx){const y0=Math.min(ay,by),y1=Math.max(ay,by);
+      for(let y=y0;y<=y1;y+=GRID)heatG(snap(ax),snap(y));}
+    else{const x0=Math.min(ax,bx),x1=Math.max(ax,bx);
+      for(let x=x0;x<=x1;x+=GRID)heatG(snap(x),snap(ay));}
+  }
+  return pts;
+}
+function simplify(pts){
+  const u=[];for(const p of pts)
+    if(!u.length||p[0]!==u[u.length-1][0]||p[1]!==u[u.length-1][1])u.push(p);
+  if(u.length<3)return u;
+  const r=[u[0]];
+  for(let i=1;i<u.length-1;i++){
+    const a=r[r.length-1],b=u[i],c=u[i+1];
+    const col=(a[0]===b[0]&&b[0]===c[0])||(a[1]===b[1]&&b[1]===c[1]);
+    if(!col)r.push(b);
+  }
+  r.push(u[u.length-1]);return r;
+}
+function midSeg(pts){
+  let best=0,bi=0;
+  for(let i=0;i<pts.length-1;i++){
+    const d=Math.abs(pts[i][0]-pts[i+1][0])+Math.abs(pts[i][1]-pts[i+1][1]);
+    if(d>best){best=d;bi=i;}
+  }
+  return[(pts[bi][0]+pts[bi+1][0])/2,(pts[bi][1]+pts[bi+1][1])/2];
+}
+const JUMP_R=5;
+function segIntersect(ax,ay,bx,by,cx,cy,dx,dy){
+  const abH=(ay===by),cdH=(cy===dy);
+  if(abH===cdH)return null;
+  let hx1,hx2,hy,vx,vy1,vy2;
+  if(abH){hx1=Math.min(ax,bx);hx2=Math.max(ax,bx);hy=ay;vx=cx;vy1=Math.min(cy,dy);vy2=Math.max(cy,dy);}
+  else{hx1=Math.min(cx,dx);hx2=Math.max(cx,dx);hy=cy;vx=ax;vy1=Math.min(ay,by);vy2=Math.max(ay,by);}
+  if(vx>hx1&&vx<hx2&&hy>vy1&&hy<vy2)return{x:vx,y:hy,hIsFirst:abH};
+  return null;
+}
+function buildPaths(allPts){
+  const segs=allPts.map(pts=>{const s=[];
+    for(let i=0;i<pts.length-1;i++)s.push([pts[i][0],pts[i][1],pts[i+1][0],pts[i+1][1]]);
+    return s;});
+  const jumps=allPts.map(()=>[]);
+  for(let i=0;i<segs.length;i++)for(let j=i+1;j<segs.length;j++)
+    for(let si=0;si<segs[i].length;si++)for(let sj=0;sj<segs[j].length;sj++){
+      const[ax,ay,bx,by]=segs[i][si],[cx,cy,dx,dy]=segs[j][sj];
+      const ix=segIntersect(ax,ay,bx,by,cx,cy,dx,dy);
+      if(ix)jumps[j].push({segIdx:sj,x:ix.x,y:ix.y});
+    }
+  return allPts.map((pts,wi)=>{
+    const myJumps=jumps[wi];
+    if(!myJumps.length)return pts.map((p,i)=>(i?"L":"M")+p[0]+" "+p[1]).join(" ");
+    myJumps.sort((a,b)=>a.segIdx-b.segIdx||a.x-b.x||a.y-b.y);
+    let d="M"+pts[0][0]+" "+pts[0][1];let jIdx=0;
+    for(let si=0;si<pts.length-1;si++){
+      const[ax,ay,bx,by]=[pts[si][0],pts[si][1],pts[si+1][0],pts[si+1][1]];
+      const isH=(ay===by);const segJumps=[];
+      while(jIdx<myJumps.length&&myJumps[jIdx].segIdx===si)segJumps.push(myJumps[jIdx++]);
+      segJumps.sort((a,b)=>isH?(a.x-b.x):(a.y-b.y));
+      for(const jmp of segJumps){
+        const jx=jmp.x,jy=jmp.y,r=JUMP_R;
+        if(isH){const dir=bx>ax?1:-1;
+          d+=` L${jx-dir*r} ${jy} A${r} ${r} 0 0 ${dir>0?1:0} ${jx+dir*r} ${jy}`;}
+        else{const dir=by>ay?1:-1;
+          d+=` L${jx} ${jy-dir*r} A${r} ${r} 0 0 ${dir>0?0:1} ${jx} ${jy+dir*r}`;}
+      }
+      d+=` L${bx} ${by}`;
+    }
+    return d;
+  });
+}
+const WIRE_COLORS=["#2563eb","#16a34a","#ea580c","#7c3aed","#0891b2","#db2777","#ca8a04","#0d9488"];
+const defs=document.createElementNS(NS,"defs");
+defs.innerHTML=WIRE_COLORS.map((c,i)=>
+  `<marker id="arr${i}" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="7"
+   refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="${c}"/></marker>`).join("");
+svg.appendChild(defs);
+initGrid();
+const allPts=DIAGRAM.wires.map(w=>route(port(w.from),port(w.to)));
+const pathDs=buildPaths(allPts);
+const wireEl={}, blockEl={};
+DIAGRAM.wires.forEach((w,wi)=>{
+  const col=WIRE_COLORS[wi%WIRE_COLORS.length];
+  const sw=Math.max(1.5,Math.min(6,Math.log2(w.bits||2)));
+  const path=document.createElementNS(NS,"path");
+  path.setAttribute("d",pathDs[wi]);path.setAttribute("class","wire");
+  path.style.stroke=col;path.setAttribute("stroke-width",sw);
+  path.setAttribute("marker-end",`url(#arr${wi%WIRE_COLORS.length})`);
+  svg.appendChild(path);wireEl[w.id]=path;
+  if(w.bits!=null){
+    const m=midSeg(allPts[wi]);const label="/"+w.bits;const tw=label.length*6.4+8;
+    const bg=document.createElementNS(NS,"rect");
+    bg.setAttribute("x",m[0]-tw/2);bg.setAttribute("y",m[1]-8);
+    bg.setAttribute("width",tw);bg.setAttribute("height",16);
+    bg.setAttribute("rx",3);bg.setAttribute("class","wire-lbl-bg");svg.appendChild(bg);
+    const tx=document.createElementNS(NS,"text");
+    tx.setAttribute("x",m[0]);tx.setAttribute("y",m[1]+4);
+    tx.setAttribute("text-anchor","middle");tx.setAttribute("class","wire-lbl");
+    tx.style.fill=col;tx.style.fontWeight="700";tx.textContent=label;svg.appendChild(tx);
+  }
+});
+DIAGRAM.blocks.forEach(b=>{
+  const g=document.createElementNS(NS,"g");g.style.cursor="pointer";
+  const r=document.createElementNS(NS,"rect");
+  r.setAttribute("x",b.x);r.setAttribute("y",b.y);
+  r.setAttribute("width",b.w);r.setAttribute("height",b.h);
+  r.setAttribute("rx",6);r.setAttribute("class","blk "+b.type);
+  g.appendChild(r);blockEl[b.id]=r;
+  const t=document.createElementNS(NS,"text");
+  t.setAttribute("x",b.x+b.w/2);t.setAttribute("y",b.y+18);
+  t.setAttribute("text-anchor","middle");t.setAttribute("class","blk-title");
+  t.textContent=b.title;g.appendChild(t);
+  (b.spec||[]).forEach((s,i)=>{
+    const st=document.createElementNS(NS,"text");
+    st.setAttribute("x",b.x+b.w/2);st.setAttribute("y",b.y+34+i*13);
+    st.setAttribute("text-anchor","middle");st.setAttribute("class","blk-spec");
+    st.textContent=s;g.appendChild(st);
+  });
+  g.addEventListener("click",()=>selectBlock(b.id));
+  svg.appendChild(g);
+});
+
+/* ================= PANEL chi tiết khối ============ */
+const panel=document.getElementById("panel");
+const CLS_COLOR={compute:"var(--compute)",buffer:"var(--buffer)",memory:"var(--memory)",control:"var(--control)"};
+let selectedId=null;
+function selectBlock(id){
+  selectedId=id;
+  Object.entries(blockEl).forEach(([k,el])=>el.classList.toggle("selected",k===id));
+  const o=INFO[id];if(!o)return;
+  const li=a=>a.map(x=>`<li><b>${x[0]}</b> — ${x[1]} <span style="color:#64748b">(${x[2]})</span></li>`).join("");
+  let rows="";
+  if(o.dsp!==undefined){
+    const vi=x=>String(x).replace(".",",");
+    const tput8=o.gop8&&o.ct?Math.round(o.gop8/o.ct*1000):null;
+    rows=`
+    <tr><td>DSP</td><td><b>${o.dsp.toLocaleString("vi")}</b> / 12.288 (${vi((o.dsp/122.88).toFixed(1))}%)</td></tr>
+    <tr><td>Peak @500 MHz</td><td>${o.peak}</td></tr>
+    <tr><td>Workload B=1</td><td>${vi(o.gop1)} GOP / chunk-256 / layer</td></tr>
+    <tr><td>Workload B=8</td><td><b>${vi(o.gop8)} GOP</b> / batch-2048 / layer</td></tr>
+    ${o.gop8?`<tr><td>C-time (B=8)</td><td>${vi(o.ct)} ms</td></tr>`:""}
+    ${tput8?`<tr><td>Throughput đạt</td><td>${tput8>=1000?vi((tput8/1000).toFixed(2))+" TOPS":tput8+" GOPS"} trong cửa sổ hoạt động</td></tr>`:""}
+    <tr><td>Throughput</td><td>${o.tput}</td></tr>
+    <tr><td>Chiếm chu kỳ layer</td><td>${o.util}</td></tr>`;
+  } else {
+    rows=`
+    <tr><td>Dung lượng</td><td>${o.cap}</td></tr>
+    <tr><td>Băng thông</td><td>${o.bw}</td></tr>`;
+  }
+  panel.innerHTML=`
+   <span class="tag" style="background:${CLS_COLOR[o.cls]}">${o.cls}</span>
+   <h2>${o.name}</h2>
+   <h3>Chức năng</h3><div>${o.func}</div>
+   <h3>Đầu vào</h3><ul class="io">${li(o.inputs)}</ul>
+   <h3>Đầu ra</h3><ul class="io">${li(o.outputs)}</ul>
+   <h3>Định lượng</h3><table>${rows}</table>
+   ${portsHtml(id)}
+   <h3>Ghi chú</h3><div>${o.note}</div>`;
+  renderWave(id);
+}
+
+/* ================= STEP-THROUGH 8 layer ============ */
+let cur=0, layer=1, timer=null;
+const stepdesc=document.getElementById("stepdesc");
+const steplist=document.getElementById("steplist");
+STEPS.forEach((s,i)=>{
+  const d=document.createElement("div");d.textContent=s.t;
+  d.addEventListener("click",()=>{go(i);});steplist.appendChild(d);
+});
+function cumTime(){
+  // thời gian ước lượng: layer đã xong × 66,9 + phần của layer hiện tại (theo tỉ lệ bước có dt)
+  const total=STEPS.reduce((a,s)=>a+s.dt,0);
+  let part=0;for(let i=1;i<=cur&&i<STEPS.length-1;i++)part+=STEPS[i].dt;
+  return (layer-1)*66.9 + Math.min(part/total,1)*66.9;
+}
+function go(i){
+  cur=i;const s=STEPS[cur];
+  Object.entries(blockEl).forEach(([k,el])=>{
+    el.classList.toggle("active",s.blocks.includes(k));
+    el.classList.toggle("dim",!s.blocks.includes(k));
+  });
+  Object.entries(wireEl).forEach(([k,el])=>{
+    el.classList.toggle("hot",s.wires.includes(k));
+    el.classList.toggle("dim",!s.wires.includes(k));
+  });
+  stepdesc.innerHTML=`<b>${s.t}.</b> ${s.d}`;
+  [...steplist.children].forEach((el,j)=>el.classList.toggle("cur",j===cur));
+  document.getElementById("lyrTag").textContent=`Layer ${layer}/8`;
+  document.getElementById("timeTag").textContent=`t ≈ ${cumTime().toFixed(1)} ms / 535 ms`;
+  if(s.blocks.length===1||INFO[s.blocks[0]])selectBlock(s.blocks[0]);
+}
+function next(){
+  if(cur<STEPS.length-1){
+    // bước 12 (index 12) là cuối một layer: nếu chưa layer 8 → quay về bước 1
+    if(cur===12&&layer<8){layer++;go(1);return;}
+    if(cur===12&&layer===8){go(13);return;}
+    if(cur===13){return;}
+    go(cur+1);
+    // bỏ qua bước 13 nếu chưa layer 8
+    if(cur===13&&layer<8){layer++;go(1);}
+  }
+}
+function prev(){
+  if(cur>1){go(cur-1);}
+  else if(cur===1&&layer>1){layer--;go(12);}
+  else{go(0);}
+}
+document.getElementById("btnNext").addEventListener("click",next);
+document.getElementById("btnPrev").addEventListener("click",prev);
+document.getElementById("btnReset").addEventListener("click",()=>{layer=1;stopPlay();clearHl();});
+function clearHl(){
+  cur=0;
+  Object.values(blockEl).forEach(el=>el.classList.remove("active","dim"));
+  Object.values(wireEl).forEach(el=>el.classList.remove("hot","dim"));
+  stepdesc.innerHTML="<b>Toàn cảnh.</b> Bấm vào một khối bất kỳ để xem chi tiết, hoặc bấm <b>Sau ▶</b> / <b>▶ Tự chạy</b> để theo dòng dữ liệu đi qua 14 bước × 8 layer.";
+  [...steplist.children].forEach(el=>el.classList.remove("cur"));
+  document.getElementById("lyrTag").textContent="Layer 1/8";
+  document.getElementById("timeTag").textContent="t ≈ 0 ms / 535 ms";
+}
+const btnPlay=document.getElementById("btnPlay");
+function stopPlay(){if(timer){clearInterval(timer);timer=null;btnPlay.textContent="▶ Tự chạy";}}
+btnPlay.addEventListener("click",()=>{
+  if(timer){stopPlay();return;}
+  btnPlay.textContent="⏸ Dừng";
+  timer=setInterval(()=>{
+    if(cur===13){stopPlay();return;}
+    next();
+  },1600);
+});
+const mHash=location.hash.match(/^#s(\d+)$/);
+if(mHash){go(Math.min(+mHash[1],STEPS.length-1));}else{clearHl();selectBlock("eca");}
+
+/* ================= GANTT FRONT ∥ ECA ============ */
+(function(){
+  const g=document.getElementById("gantt");
+  const W=1200,H=170,X0=120,PXMS=(W-X0-30)/133.8; // 2 chu kỳ 66,9 ms
+  g.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  const rows=[
+    {y:20,label:"FRONT (7.976 DSP)",cells:[
+      {t0:0,dur:38.8,a:"c",txt:"C: batch i+1 · 619 GOP",tip:"FRONT compute batch i+1: 619,2 GOP / 15,95 TOPS @500 MHz = 38,8 ms · đọc weight attn 108 MB (1,66 ms, xen kẽ)"},
+      {t0:38.8,dur:28.1,a:"i",txt:"chờ ECA",tip:"FRONT xong sớm — chờ chu kỳ DDR (idle 28,1 ms/66,9 ms)"},
+      {t0:66.9,dur:38.8,a:"c",txt:"C: batch i+2",tip:"FRONT compute batch i+2"},
+      {t0:105.7,dur:28.1,a:"i",txt:"chờ",tip:"idle"}]},
+    {y:60,label:"ECA stream (DDR)",cells:[
+      {t0:0,dur:52.4,a:"r",txt:"R: 3,40 GB expert weight (batch i)",tip:"Stream 97 expert × 33 MB FP4 + scale E8M0 qua 4 kênh DDR @65,3 GB/s = 52,4 ms"},
+      {t0:66.9,dur:52.4,a:"r",txt:"R: 3,40 GB (batch i+1)",tip:"Stream weight layer kế cho batch i+1"}]},
+    {y:100,label:"ECA MAC (4.096 DSP)",cells:[
+      {t0:0.4,dur:57.8,a:"c",txt:"C: SwiGLU batch i · 473,6 GOP",tip:"473,6 GOP / 8,19 TOPS @500 MHz = 57,8 ms — MAC util 86% chu kỳ layer"},
+      {t0:67.3,dur:57.8,a:"c",txt:"C: batch i+1",tip:"SwiGLU batch i+1"}]},
+    {y:140,label:"ICI + PCIe",cells:[
+      {t0:2,dur:3.5,a:"w",txt:"AR",tip:"all-reduce ô: 44 MB ring = 3,5 ms"},
+      {t0:7,dur:10.6,a:"w",txt:"A2A",tip:"all-to-all dispatch+combine: 133 MB = 10,6 ms"},
+      {t0:20,dur:8.8,a:"r",txt:"X i/o",tip:"PCIe: X vào/ra 115 MB = 8,8 ms (1 lần/stage)"},
+      {t0:68.9,dur:3.5,a:"w",txt:"AR",tip:"chu kỳ kế"},{t0:73.9,dur:10.6,a:"w",txt:"A2A",tip:"chu kỳ kế"}]}
+  ];
+  const AC={c:"var(--act-c)",r:"var(--act-r)",w:"var(--act-w)",i:"var(--act-i)"};
+  // trục thời gian
+  for(const ms of [0,10,20,30,40,50,60,66.9,80,90,100,110,120,133.8]){
+    const x=X0+ms*PXMS;
+    const l=document.createElementNS(NS,"line");
+    l.setAttribute("x1",x);l.setAttribute("x2",x);l.setAttribute("y1",14);l.setAttribute("y2",H-12);
+    l.setAttribute("stroke",ms===66.9?"#94a3b8":"#e2e8f0");
+    l.setAttribute("stroke-width",ms===66.9?1.5:1);
+    l.setAttribute("stroke-dasharray",ms===66.9?"":"3 3");g.appendChild(l);
+    const t=document.createElementNS(NS,"text");
+    t.setAttribute("x",x);t.setAttribute("y",10);t.setAttribute("text-anchor","middle");
+    t.setAttribute("font-size","9");t.setAttribute("fill","#64748b");
+    t.textContent=(ms===66.9?"66,9":Math.round(ms))+ (ms===133.8?" ms":"");g.appendChild(t);
+  }
+  rows.forEach(r=>{
+    const t=document.createElementNS(NS,"text");
+    t.setAttribute("x",4);t.setAttribute("y",r.y+17);t.setAttribute("font-size","10.5");
+    t.setAttribute("font-weight","700");t.setAttribute("fill","#334155");
+    t.textContent=r.label;g.appendChild(t);
+    r.cells.forEach(c=>{
+      const rc=document.createElementNS(NS,"rect");
+      rc.setAttribute("x",X0+c.t0*PXMS);rc.setAttribute("y",r.y);
+      rc.setAttribute("width",Math.max(2,c.dur*PXMS));rc.setAttribute("height",26);
+      rc.setAttribute("rx",3);rc.setAttribute("fill",AC[c.a]);
+      rc.setAttribute("opacity",c.a==="i"?1:0.9);
+      const tip=document.createElementNS(NS,"title");tip.textContent=c.tip;rc.appendChild(tip);
+      g.appendChild(rc);
+      if(c.dur*PXMS>40){
+        const tx=document.createElementNS(NS,"text");
+        tx.setAttribute("x",X0+(c.t0+c.dur/2)*PXMS);tx.setAttribute("y",r.y+17);
+        tx.setAttribute("text-anchor","middle");tx.setAttribute("font-size","9.5");
+        tx.setAttribute("fill",c.a==="i"?"#64748b":"#fff");tx.setAttribute("pointer-events","none");
+        tx.textContent=c.txt;g.appendChild(tx);
+      }
+    });
+  });
+})();
+
+/* ================= TIME-SPACE (engine theo timespace-template hw-diagram) ============ */
+(function(){
+  const tstip=document.getElementById("tstip");
+  function fmtBytes(b){
+    if(b>=1e9) return (b/1e9).toFixed(2).replace(".",",")+" GB";
+    if(b>=1e6) return (b/1e6).toFixed(1).replace(".",",")+" MB";
+    if(b>=1e3) return (b/1e3).toFixed(1).replace(".",",")+" KB";
+    return b+" B";
+  }
+  const AL={read:"RD",write:"WR",compute:"MAC",stall:"--"};
+  function makeTS(containerId, metaId, DATA){
+    const root=document.getElementById(containerId);
+    document.getElementById(metaId).textContent=DATA.meta.sub||"";
+    const collapsed=new Set();
+    const idx={}; DATA.cells.forEach(c=>idx[c.fu+"|"+c.stage]=c);
+    const leaves=n=>n.children?n.children.flatMap(leaves):[n];
+    const isG=n=>!!n.children;
+    function rowsVisible(){
+      const rows=[];
+      (function walk(n,d){rows.push({n,d,g:isG(n),c:collapsed.has(n.id)});
+        if(isG(n)&&!collapsed.has(n.id))n.children.forEach(ch=>walk(ch,d+1));})
+      (DATA.hierarchy[0],0);
+      DATA.hierarchy.slice(1).forEach(n=>(function walk(n,d){rows.push({n,d,g:isG(n),c:collapsed.has(n.id)});
+        if(isG(n)&&!collapsed.has(n.id))n.children.forEach(ch=>walk(ch,d+1));})(n,0));
+      return rows;
+    }
+    function agg(node,stage){
+      const items=leaves(node).map(l=>idx[l.id+"|"+stage]).filter(Boolean);
+      if(!items.length)return null;
+      const as=[...new Set(items.map(i=>i.action))];
+      let bytes=0,ops=0;items.forEach(i=>{bytes+=i.bytes||0;ops+=i.ops_per_cyc||0;});
+      return {action:as.length===1?as[0]:"mixed",count:items.length,bytes,ops,items};
+    }
+    function render(){
+      let h="<div class='tsx-wrap'><table class='tsx'><thead><tr><th class='rowhdr'>FU \\ t</th>";
+      DATA.stages.forEach(st=>h+="<th>"+st+"</th>");
+      h+="</tr></thead><tbody>";
+      rowsVisible().forEach(r=>{
+        const pad=8+r.d*16, tri=r.g?(r.c?"▶":"▼"):"";
+        h+=`<tr><td class="rowhdr${r.g?" group":""}" style="padding-left:${pad}px" data-t="${r.g?r.n.id:""}">`+
+           `<span class="tri">${tri}</span>${r.n.label}</td>`;
+        DATA.stages.forEach(st=>{
+          if(r.g&&r.c){
+            const a=agg(r.n,st);
+            if(!a){h+="<td class='cell empty'></td>";return;}
+            const lbl=a.action==="mixed"?"MIX×"+a.count:AL[a.action];
+            h+=`<td class="cell ${a.action}" data-p="${encodeURIComponent(JSON.stringify({type:"agg",st,label:r.n.label,a}))}">${lbl}</td>`;
+          }else if(!r.g){
+            const c=idx[r.n.id+"|"+st];
+            if(!c){h+="<td class='cell empty'></td>";return;}
+            const txt=c.action==="compute"?"MAC":(c.action==="read"?"RD:"+(c.buffer||""):(c.action==="write"?"WR:"+(c.buffer||""):"chờ"));
+            h+=`<td class="cell ${c.action}" data-p="${encodeURIComponent(JSON.stringify({type:"leaf",st,fu:r.n.label,c}))}">${txt}</td>`;
+          }else h+="<td class='cell empty'></td>";
+        });
+        h+="</tr>";
+      });
+      h+="</tbody></table></div>";
+      const btns=`<div class="tsx-controls"><button data-a="x">Mở rộng tất cả</button><button data-a="c">Thu gọn tất cả</button></div>`;
+      root.innerHTML=btns+h;
+      root.querySelectorAll(".tsx-controls button").forEach(b=>b.addEventListener("click",()=>{
+        if(b.dataset.a==="x")collapsed.clear();
+        else (function ids(){const r=[];(function w(n){if(isG(n)){r.push(n.id);n.children.forEach(w);}})
+          ({children:DATA.hierarchy});return r;})().forEach(id=>collapsed.add(id));
+        render();
+      }));
+      root.querySelectorAll(".rowhdr.group").forEach(el=>el.addEventListener("click",()=>{
+        const id=el.dataset.t;collapsed.has(id)?collapsed.delete(id):collapsed.add(id);render();
+      }));
+      root.querySelectorAll("td.cell[data-p]").forEach(el=>{
+        el.addEventListener("mousemove",e=>{
+          const p=JSON.parse(decodeURIComponent(el.dataset.p));let h2="";
+          if(p.type==="leaf"){
+            const c=p.c;h2=`<b>${p.fu} @ ${p.st}</b><br>`;
+            if(c.action==="compute")h2+=`Tính: ${c.rate||""}`+(c.ops_per_cyc?` · ${c.ops_per_cyc.toLocaleString("vi")} GOPS`:"");
+            else if(c.action==="stall")h2+="Chờ (idle) — "+(c.tensor||"đợi chu kỳ DDR");
+            else h2+=`${c.action==="read"?"Đọc":"Ghi"} ${c.buffer||""}<br>Bytes: ${fmtBytes(c.bytes||0)}<br>Tensor: ${c.tensor||"—"}`;
+          }else{
+            const a=p.a;h2=`<b>${p.label} @ ${p.st}</b> · ${a.count} FU<br>`;
+            if(a.action==="compute")h2+=`Tổng: ${a.ops.toLocaleString("vi")} GOPS`;
+            else if(a.action==="mixed")h2+=`Hỗn hợp:<br>`+a.items.map(i=>` · ${i.fu}: ${i.action}`+(i.action==="compute"?` ${i.rate||""}`:` ${fmtBytes(i.bytes||0)}`)).join("<br>");
+            else if(a.action==="stall")h2+="Cả nhóm chờ chu kỳ DDR";
+            else h2+=`Tổng bytes: ${fmtBytes(a.bytes)}`;
+          }
+          tstip.innerHTML=h2;tstip.style.opacity=1;
+          tstip.style.left=Math.min(e.clientX+14,innerWidth-tstip.offsetWidth-10)+"px";
+          tstip.style.top=Math.min(e.clientY+14,innerHeight-tstip.offsetHeight-10)+"px";
+        });
+        el.addEventListener("mouseleave",()=>tstip.style.opacity=0);
+      });
+    }
+    render();
+  }
+
+  /* ---- DATA A: mức layer (13 cột × 5,15 ms = 66,9 ms) ---- */
+  const ST=[...Array(13)].map((_,i)=>"t"+i);
+  const cells=[];
+  // FRONT (batch i+1): [id, rate, GOPS đạt, số cột active]
+  [["mhce","0,08 TOPS",80,8],["acu","1,54 TOPS",1540,9],["liu","2,56 TOPS",2560,8],
+   ["qcau","6,66 TOPS",6660,8],["gopu","4,86 TOPS",4860,8],["mru","0,26 TOPS",260,10]]
+  .forEach(([id,rate,g,nc])=>{for(let t=0;t<13;t++)
+    cells.push(t<nc?{fu:id,stage:"t"+t,action:"compute",rate:rate+" · batch i+1",ops_per_cyc:g}
+                   :{fu:id,stage:"t"+t,action:"stall",tensor:"chờ ECA/DDR (FRONT xong sau 38,8 ms)"});});
+  // ECA MAC (batch i)
+  for(let t=0;t<13;t++)cells.push({fu:"eca",stage:"t"+t,action:"compute",
+    rate:"8,19 TOPS · SwiGLU batch i",ops_per_cyc:8190});
+  // DDR/DMA stream
+  cells.push({fu:"dmar",stage:"t0",action:"read",buffer:"DDR4",bytes:113e6,
+    tensor:"W_attn layer L (ACU/LIU/QCAU/GOPU/MRU)"});
+  for(let t=1;t<13;t++)cells.push({fu:"dmar",stage:"t"+t,action:"read",buffer:"DDR4",bytes:264e6,
+    tensor:`expert e${8*(t-1)}–e${8*t-1} (8×33 MB FP4)`});
+  // KV append
+  cells.push({fu:"kvw",stage:"t8",action:"write",buffer:"DDR4",bytes:296e3,tensor:"KV append layer L · batch-8"});
+  // ICI
+  cells.push({fu:"icir",stage:"t8",action:"write",buffer:"QSFP",bytes:44e6,tensor:"all-reduce ô (batch i+1) · 3,5 ms"});
+  cells.push({fu:"icir",stage:"t9",action:"write",buffer:"QSFP",bytes:33e6,tensor:"A2A dispatch h (batch i+1)"});
+  cells.push({fu:"icir",stage:"t10",action:"write",buffer:"QSFP",bytes:33e6,tensor:"A2A dispatch h (tiếp)"});
+  cells.push({fu:"icir",stage:"t12",action:"write",buffer:"QSFP",bytes:66e6,tensor:"A2A combine y (batch i) · 5,3 ms"});
+  // PCIe (chỉ tại layer biên stage)
+  cells.push({fu:"pcier",stage:"t4",action:"read",buffer:"PCIe",bytes:115e6,tensor:"X in batch i+2 (1 lần/stage, 8,8 ms)"});
+  cells.push({fu:"pcier",stage:"t6",action:"write",buffer:"PCIe",bytes:115e6,tensor:"X′ out batch i−1 (1 lần/stage)"});
+  const DATA_A={
+    meta:{sub:"1 cột = 5,15 ms · 13 cột = chu kỳ layer 66,9 ms · FRONT làm batch (i+1), ECA làm batch (i) — số GOPS/bytes theo spec U250"},
+    stages:ST,
+    hierarchy:[{id:"chip",label:"Chip U250 (12.288 DSP)",children:[
+      {id:"gfront",label:"FRONT · 7.976 DSP · batch i+1",children:[
+        {id:"mhce",label:"mHCE (40 DSP)"},{id:"acu",label:"ACU (768)"},
+        {id:"liu",label:"LIU/HCA (1.280)"},{id:"qcau",label:"QCAU (3.328)"},
+        {id:"gopu",label:"GOPU (2.432)"},{id:"mru",label:"MRU (128)"}]},
+      {id:"geca",label:"ECA · 4.096 DSP · batch i",children:[
+        {id:"eca",label:"ECA MAC 4×sub-array"}]},
+      {id:"gio",label:"Memory / IO",children:[
+        {id:"dmar",label:"mSGDMA ← DDR4 (65,3 GB/s)"},
+        {id:"kvw",label:"KV append → DDR4"},
+        {id:"icir",label:"ICI ring (QSFP28)"},
+        {id:"pcier",label:"PCIe (X in/out)"}]}]}],
+    cells};
+
+  /* ---- DATA B: mức tile — ECA double-buffer ---- */
+  const STT=["tile n","n+1","n+2","n+3","n+4","n+5"];
+  const cellsB=[];
+  STT.forEach((st,k)=>{
+    const bankW=k%2?"WTB-A":"WTB-B", bankR=k%2?"WTB-B":"WTB-A";
+    cellsB.push({fu:"tdma",stage:st,action:"write",buffer:bankW,bytes:4e6,
+      tensor:`tile ${k+1} kế tiếp (1 MB/kênh × 4 kênh, 61 µs)`});
+    cellsB.push({fu:"teca",stage:st,action:"compute",
+      rate:`MAC từ ${bankR} · 0,6 GOP/tile · 61 µs`,ops_per_cyc:9830});
+    cellsB.push({fu:"tdq",stage:st,action:"read",buffer:bankR,bytes:4e6,
+      tensor:"dequant FP4→INT8 (LUT), nội SLR"});
+  });
+  const DATA_B={
+    meta:{sub:"1 cột = 1 tile 4 MB = 61 µs · ~793 tile/layer · load ≈ compute tại B=8 (điểm cân bằng)"},
+    stages:STT,
+    hierarchy:[{id:"tile",label:"ECA tile pipeline (1 SLR ×4)",children:[
+      {id:"tdma",label:"mSGDMA ghi bank đối diện"},
+      {id:"tdq",label:"AGU + dequant đọc bank hiện tại"},
+      {id:"teca",label:"ECA MAC (1.024 DSP/SLR ×4)"}]}],
+    cells:cellsB};
+
+  makeTS("ts1","ts1meta",DATA_A);
+  makeTS("ts2","ts2meta",DATA_B);
+})();
+
+/* ============ WAVEFORM DATAFLOW → PHAN CUNG (1 layer, B=8) ============ */
+(function(){
+  const g=document.getElementById("dfwf"); if(!g)return;
+  const NS2="http://www.w3.org/2000/svg";
+  /* 9 phép toán của dataflow (op8 chiếm 97% chu kỳ — trục phi tuyến) */
+  const OPS=[
+   {id:1,m:"X̂ = RMSNorm(X)·A, Sinkhorn(B)",fu:"mHCE",w:82,dur:"~1,7 ms"},
+   {id:2,m:"C,Z = X̂·W_aKV… → C^Comp",fu:"ACU",w:96,dur:"~4,1 ms"},
+   {id:3,m:"I = q_I·K^IComp → top-k 1024",fu:"LIU",w:96,dur:"~4,0 ms"},
+   {id:4,m:"q = c_Q·W_UQ; RoPE; MQA",fu:"QCAU",w:112,dur:"~8,1 ms"},
+   {id:5,m:"ô = Σ o^G·W_OG·W_O (+AR)",fu:"GOPU·ICI",w:104,dur:"~8,1 ms"},
+   {id:6,m:"X′ = B·X + C·ô",fu:"mHCE",w:64,dur:"~1,2 ms"},
+   {id:7,m:"g̃ = router(X̂′); top-6; dispatch",fu:"MRU·ICI",w:96,dur:"~1,2+5,3 ms"},
+   {id:8,m:"y = W_down(SiLU(W_g h)⊙W_u h) ×96 expert",fu:"ECA",w:226,dur:"57,8 ms = 86% chu kỳ"},
+   {id:9,m:"combine; X_{l+1} = B·X′ + C·y",fu:"ICI·mHCE",w:96,dur:"5,3+~1,2 ms"}];
+  /* Hàng phần cứng; cells: [op, action r/c/w, nhãn ngắn, tooltip] */
+  const ROWS=[
+   {n:"── batch i (dòng vẽ dưới) ──",ghost:1,cells:[[1,9,"op1 → op9 của batch i (66,9 ms)"]]},
+   {n:"── batch i+1 trên FRONT ──",ghost:1,cells:[[8,8,"trong lúc ECA(batch i) stream 52,4 ms, FRONT chạy op1–op7 của batch i+1 (38,8 ms)"]]},
+   {n:"mSGDMA RD DDR4 (EWD +1 op)",cells:[
+     [1,"r","W_LIU 17,5 MB","Prefetch weight của op3 (LIU): W_DQ 11,0 FP8 + W_IUQ/W_w 6,5 FP4 — trong khi op1 đang tính"],
+     [2,"r","W_UQ 25,2 MB","Prefetch weight op4 (QCAU): W_UQ slice 32 head FP8"],
+     [3,"r","W_OG·W_O 46,1 MB","Prefetch weight op5 (GOPU): W_OG 16,8 + W_O 29,4 FP8"],
+     [4,"r","W_rt 2,8 MB","Prefetch weight op7 (MRU): W_router FP8"],
+     [5,"r","expert…","Bắt đầu stream expert (op8) ngay khi kênh rảnh"],
+     [6,"r","expert…","tiếp tục stream expert"],
+     [7,"r","expert 3,40 GB…","Stream 97 expert × 33 MB FP4 + scale E8M0, stripe 4 kênh × 19,2 GB/s"],
+     [8,"r","…expert 3,40 GB (52,4 ms)","65,3 GB/s hiệu dụng — chiếm trọn op8; đây là đường găng của chip"],
+     [9,"r","W_mHC+W_ACU L+1 16,1 MB","Prefetch layer kế: W_pre/res/post 1,4 + W_aKV… 14,7 MB"]]},
+   {n:"mSGDMA WR DDR4",cells:[[2,"w","KV 0,33 MB","Append C^Comp 0,30 + K^IComp 0,03 MB (batch-8) vào KV cache DDR"]]},
+   {n:"WTB → dequant → FU",cells:[
+     [1,"r","W_mHC 1,4","FU đọc weight op HIỆN TẠI từ WTB (đã prefetch từ op trước) — lệch 1 op so với hàng DDR = pipeline EWD"],
+     [2,"r","W_ACU 14,7","4 ma trận (d,c) FP8"],[3,"r","W_LIU 17,5","dequant FP4→INT8 cho W_IUQ/W_w"],
+     [4,"r","W_UQ 25,2","tile ≤4 MB ping-pong"],[5,"r","W 46,1","W_OG + W_O slice"],
+     [7,"r","W_rt 2,8",""],[8,"r","expert 3,40 GB","2.048b/lane @500 MHz, mỗi tile 1 MiB/kênh"]]},
+   {n:"RAB đọc (→FU)",cells:[
+     [1,"r","X 117 MB","X_l (s,n_hc,d) BF16 ×8 chunk"],[2,"r","X̂ 14,7","FP8"],[3,"r","X̂ 14,7",""],
+     [4,"r","c_Q 3,1",""],[5,"r","o 67,1","(s,32,c) BF16 ×8"],[6,"r","X·ô 147","X 117 + ô 29,4"],
+     [7,"r","X̂′ 14,7",""],[8,"r","h 12,3","token FP8 sau dispatch"],[9,"r","y_e·X′ 130","y_e 12,3 + X′ 117"]]},
+   {n:"RAB ghi (FU→)",cells:[
+     [1,"w","X̂ 14,7",""],[4,"w","o 67,1",""],[5,"w","ô 29,4","partial rồi tổng sau AR"],
+     [6,"w","X′ 117",""],[8,"w","y_e 12,3",""],[9,"w","X_{l+1} 117","sang layer kế / PCIe nếu là L8"]]},
+   {n:"KVB",cells:[
+     [2,"w","C^Comp 0,33","KV mới (64 entry×576 B ×8) + K^IComp"],
+     [3,"w","KV top-k","nạp 𝒞^SprsComp từ DDR theo descriptor của LIU"],
+     [4,"r","664 KB/query","(k+n_win)=1.152 entry × 576 B, broadcast 32 head (MQA)"]]},
+   {n:"PSA",cells:[
+     [3,"w","idx 8,4 MB","top-k 1024 × INT32 × 2.048 query"],
+     [7,"w","route 57 KB","(top_idx, w_top) 28 B/token"],
+     [8,"r","route","ECA đọc danh sách (token, expert, gate)"]]},
+   {n:"mHCE (40 DSP)",cells:[
+     [1,"c","1,1 GOP","RMSNorm + sinh A,B,C + Sinkhorn 20 vòng @ 96 GOPS"],
+     [6,"c","1,1 GOP","X′ = B·X + C·ô"],[9,"c","1,1 GOP","X_{l+1} = B·X′ + C·y (cộng gate 6 expert + shared)"]]},
+   {n:"ACU (768 DSP)",cells:[[2,"c","60 GOP","KV-compress @1,54 TOPS = 39,1 ms/8 op-window (tile-pipelined)"]]},
+   {n:"LIU (1.280 DSP)",cells:[[3,"c","98,4 GOP","index-score FP4 + bitonic top-k @2,56 TOPS"]]},
+   {n:"QCAU (3.328 DSP)",cells:[[4,"c","257,6 GOP","q·W_UQ + RoPE + QK^T softmax ·V @6,66 TOPS"]]},
+   {n:"GOPU (2.432 DSP)",cells:[[5,"c","188,8 GOP","grouped proj @4,86 TOPS → partial ô"]]},
+   {n:"MRU (128 DSP)",cells:[[7,"c","11,2 GOP","X̂′·W_router + Sqrt-Softplus + top-6 @0,26 TOPS"]]},
+   {n:"ICI · QSFP28",cells:[
+     [5,"w","AR ô 44 MB","all-reduce ring 4 card = 3,5 ms, chồng lấn dưới op8 của batch trước"],
+     [7,"w","A2A h 66 MB","dispatch token tới card giữ expert = 5,3 ms"],
+     [9,"w","A2A y 66 MB","combine y_e về home-card = 5,3 ms"]]},
+   {n:"ECA (4.096 DSP)",cells:[[8,"c","473,6 GOP","SwiGLU 97 expert @8,19 TOPS = 57,8 ms; đọc weight 52,4 ms — MAC util 86% chu kỳ layer 66,9 ms"]]}
+  ];
+  const LBL=186, HDR=46, RH=27, PAD=14;
+  const opX=[LBL]; OPS.forEach(o=>opX.push(opX[opX.length-1]+o.w));
+  const W=opX[opX.length-1]+PAD, H=HDR+ROWS.length*RH+8;
+  g.setAttribute("viewBox",`0 0 ${W} ${H}`); g.setAttribute("width",W);
+  const AC={r:"#2563eb",c:"#7c3aed",w:"#16a34a"};
+  const mk=(t,a,x)=>{const e=document.createElementNS(NS2,t);for(const k in a)e.setAttribute(k,a[k]);if(x!=null)e.textContent=x;g.appendChild(e);return e;};
+  OPS.forEach((o,i)=>{
+    mk("line",{x1:opX[i],x2:opX[i],y1:4,y2:H-4,class:"wf-grid"});
+    const cxm=(opX[i]+opX[i+1])/2;
+    mk("text",{x:cxm,y:13,"text-anchor":"middle","font-size":8.6,"font-weight":700,fill:"#334155"},"op"+o.id+" · "+o.fu);
+    const t=mk("text",{x:cxm,y:24,"text-anchor":"middle","font-size":7.6,fill:"#475569"},
+      o.m.length>Math.floor(o.w/4.4)?o.m.slice(0,Math.floor(o.w/4.4)-1)+"…":o.m);
+    t.appendChild(Object.assign(document.createElementNS(NS2,"title"),{textContent:o.m}));
+    mk("text",{x:cxm,y:35,"text-anchor":"middle",class:"wf-dur"},o.dur);
+  });
+  mk("line",{x1:opX[OPS.length],x2:opX[OPS.length],y1:4,y2:H-4,class:"wf-grid"});
+  ROWS.forEach((r,ri)=>{
+    const y=HDR+ri*RH, hi=y+3, lo=y+RH-7, mid=(hi+lo)/2;
+    mk("text",{x:4,y:mid+3,class:"wf-sig","font-size":r.ghost?9:10},r.n);
+    if(r.ghost){
+      const [a,b,tip]=r.cells[0];
+      const x0=opX[a-1]+3, x1=opX[b]-3;
+      const rc=mk("rect",{x:x0,y:mid-6,width:x1-x0,height:12,rx:6,fill:ri?"#fde68a":"#e0e7ff",stroke:ri?"#f59e0b":"#6366f1","stroke-width":1});
+      rc.appendChild(Object.assign(document.createElementNS(NS2,"title"),{textContent:tip}));
+      mk("text",{x:(x0+x1)/2,y:mid+3,"text-anchor":"middle","font-size":8,fill:"#475569"},tip.length>90?(ri?"FRONT batch i+1 ∥ ECA batch i":tip.slice(0,88)):tip);
+      return;
+    }
+    mk("line",{x1:LBL,x2:opX[OPS.length],y1:mid,y2:mid,class:"wf-idle"});
+    r.cells.forEach(([op,ac,lab,tip])=>{
+      const x0=opX[op-1]+2, x1=opX[op]-2, w=x1-x0;
+      const p=mk("path",{d:`M${x0} ${mid} L${x0+3} ${hi} L${x1-3} ${hi} L${x1} ${mid} L${x1-3} ${lo} L${x0+3} ${lo} Z`,
+        fill:AC[ac]+"22",stroke:AC[ac],"stroke-width":1.4});
+      p.appendChild(Object.assign(document.createElementNS(NS2,"title"),
+        {textContent:(ac==="r"?"ĐỌC: ":ac==="c"?"TÍNH: ":"GHI: ")+lab+(tip?" — "+tip:"")}));
+      if(w>26){
+        const tx=mk("text",{x:(x0+x1)/2,y:mid+3,"text-anchor":"middle","font-size":8.2,
+          "font-weight":600,fill:AC[ac],"pointer-events":"none"},
+          lab.length>Math.floor(w/4.6)?lab.slice(0,Math.floor(w/4.6)-1)+"…":lab);
+      }
+    });
+  });
+
+  /* ---- inset: pipeline tile (op8, 61 µs/tile) ---- */
+  const g2=document.getElementById("dfwf2");
+  const T=6, TW=150, TL=210, H2=46+4*24+6, W2=TL+T*TW+14;
+  g2.setAttribute("viewBox",`0 0 ${W2} ${H2}`); g2.setAttribute("width",W2);
+  const mk2=(t,a,x)=>{const e=document.createElementNS(NS2,t);for(const k in a)e.setAttribute(k,a[k]);if(x!=null)e.textContent=x;g2.appendChild(e);return e;};
+  for(let i=0;i<=T;i++){
+    const x=TL+i*TW;
+    mk2("line",{x1:x,x2:x,y1:4,y2:H2-4,class:"wf-grid"});
+    if(i<T)mk2("text",{x:x+TW/2,y:14,"text-anchor":"middle","font-size":9,"font-weight":700,fill:"#334155"},"tile "+(i? "n+"+i:"n")+" · 61 µs");
+  }
+  const R2=[
+   {n:"mSGDMA WR WTB (bank đối diện)",ac:"w",off:0,lab:i=>"WR "+(i%2?"A":"B")+": tile "+(i?"n+"+(i+1):"n+1")+" · 4 MB",tip:"DMA ghi tile KẾ vào bank rảnh (1 MB/kênh × 4 kênh DDR)"},
+   {n:"AGU + dequant RD WTB (bank hiện tại)",ac:"r",off:0,lab:i=>"RD "+(i%2?"B":"A")+": tile "+(i?"n+"+i:"n")+" · 4 MiB",tip:"đọc 2.048b/lane @500 MHz, dequant FP4→INT8"},
+   {n:"ECA MAC 4.096 DSP",ac:"c",off:0,lab:i=>"C: tile "+(i?"n+"+i:"n")+" · 0,6 GOP",tip:"8,19 TOPS → 75,8 µs/tile > 68,3 µs nạp ⇒ MAC không chờ"},
+   {n:"WR RAB (y_e)",ac:"w",off:1,lab:i=>"WR: tile "+(i===0?"n−1":(i===1?"n":"n+"+(i-1)))+" kết quả",tip:"kết quả tile TRƯỚC ghi RAB trong khi tile hiện tại đang tính"}
+  ];
+  R2.forEach((r,ri)=>{
+    const y=34+ri*24, hi=y+2, lo=y+18, mid=(hi+lo)/2;
+    mk2("text",{x:4,y:mid+3,class:"wf-sig","font-size":9.4},r.n);
+    for(let i=0;i<T;i++){
+      const x0=TL+i*TW+3, x1=TL+(i+1)*TW-3;
+      const p=mk2("path",{d:`M${x0} ${mid} L${x0+3} ${hi} L${x1-3} ${hi} L${x1} ${mid} L${x1-3} ${lo} L${x0+3} ${lo} Z`,
+        fill:AC[r.ac]+"22",stroke:AC[r.ac],"stroke-width":1.4});
+      p.appendChild(Object.assign(document.createElementNS(NS2,"title"),{textContent:r.tip}));
+      mk2("text",{x:(x0+x1)/2,y:mid+3,"text-anchor":"middle","font-size":8.6,"font-weight":600,fill:AC[r.ac],"pointer-events":"none"},r.lab(i));
+    }
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,985 @@
+<mxGraphModel dx="6000" dy="5500" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="4200" pageHeight="5000" math="0" shadow="0">
+  <root>
+    <mxCell id="ov-0" />
+    <mxCell id="ov-1" parent="ov-0" />
+
+    <!-- ================================================================== -->
+    <!-- SECTION 1: QCAU TOP-LEVEL BLOCK DIAGRAM                           -->
+    <!-- ================================================================== -->
+
+    <!-- Outer QCAU container (thick border) -->
+    <mxCell id="qcau-box" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;strokeWidth=5;" value="" vertex="1">
+      <mxGeometry height="500" width="1100" x="500" y="200" as="geometry" />
+    </mxCell>
+    <!-- QCAU title -->
+    <mxCell id="qcau-title-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 24px;&quot;&gt;QCAU&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="80" x="520" y="205" as="geometry" />
+    </mxCell>
+
+    <!-- Sub-block: _query_up (thick border) -->
+    <mxCell id="qcau-qu-box" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;strokeWidth=5;" value="&lt;font style=&quot;font-size: 24px;&quot;&gt;_query_up&lt;/font&gt;" vertex="1">
+      <mxGeometry height="380" width="200" x="560" y="280" as="geometry" />
+    </mxCell>
+
+    <!-- Sub-block: _sparse_attention_online (thick border) -->
+    <mxCell id="qcau-sa-box" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;strokeWidth=5;" value="&lt;font style=&quot;font-size: 24px;&quot;&gt;Sparse&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 24px;&quot;&gt;Attention&lt;/font&gt;&lt;/div&gt;&lt;div&gt;&lt;font style=&quot;font-size: 24px;&quot;&gt;(online)&lt;/font&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="280" width="200" x="920" y="340" as="geometry" />
+    </mxCell>
+
+    <!-- Sub-block: RoPE inverse -->
+    <mxCell id="qcau-irope-box" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;strokeWidth=5;" value="&lt;font style=&quot;font-size: 24px;&quot;&gt;RoPE&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 24px;&quot;&gt;(inverse)&lt;/font&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="130" width="120" x="1300" y="415" as="geometry" />
+    </mxCell>
+
+    <!-- ====== INPUT LABELS ====== -->
+
+    <!-- c_q [B,S,D_C] -->
+    <mxCell id="in-cq-dtype" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;FP32&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="60" x="390" y="290" as="geometry" />
+    </mxCell>
+    <mxCell id="in-cq-name" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;c_q&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="60" x="390" y="320" as="geometry" />
+    </mxCell>
+    <!-- c_q arrow -->
+    <mxCell id="e-cq" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="400" y="335" as="sourcePoint" />
+        <mxPoint x="560" y="335" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <!-- c_q bus tick -->
+    <mxCell id="t-cq" edge="1" parent="ov-1" style="endArrow=none;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="470" y="343" as="sourcePoint" />
+        <mxPoint x="480" y="333" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <!-- c_q shape label on arrow -->
+    <mxCell id="in-cq-shape" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[B,S,D_C]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="80" x="475" y="316" as="geometry" />
+    </mxCell>
+
+    <!-- w_uq -->
+    <mxCell id="in-wuq-dtype" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;FP32&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="60" x="390" y="380" as="geometry" />
+    </mxCell>
+    <mxCell id="in-wuq-name" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;w_uq&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="60" x="390" y="410" as="geometry" />
+    </mxCell>
+    <mxCell id="e-wuq" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="400" y="425" as="sourcePoint" />
+        <mxPoint x="560" y="425" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="t-wuq" edge="1" parent="ov-1" style="endArrow=none;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="470" y="433" as="sourcePoint" />
+        <mxPoint x="480" y="423" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- q_head_norm_weight -->
+    <mxCell id="in-qhnw-dtype" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;FP32&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="60" x="355" y="460" as="geometry" />
+    </mxCell>
+    <mxCell id="in-qhnw-name" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;q_head_norm_wt&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="160" x="285" y="490" as="geometry" />
+    </mxCell>
+    <mxCell id="e-qhnw" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="400" y="505" as="sourcePoint" />
+        <mxPoint x="560" y="505" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="t-qhnw" edge="1" parent="ov-1" style="endArrow=none;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="470" y="513" as="sourcePoint" />
+        <mxPoint x="480" y="503" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- freqs_cis -->
+    <mxCell id="in-fc-dtype" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;Complex&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="80" x="370" y="550" as="geometry" />
+    </mxCell>
+    <mxCell id="in-fc-name" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;freqs_cis&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="100" x="350" y="580" as="geometry" />
+    </mxCell>
+    <mxCell id="e-fc" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="400" y="595" as="sourcePoint" />
+        <mxPoint x="560" y="595" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="t-fc" edge="1" parent="ov-1" style="endArrow=none;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="470" y="603" as="sourcePoint" />
+        <mxPoint x="480" y="593" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- kv [B,N,Dh] from top -->
+    <mxCell id="in-kv-dtype" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;FP32&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="60" x="910" y="230" as="geometry" />
+    </mxCell>
+    <mxCell id="in-kv-name" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;kv&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="40" x="920" y="260" as="geometry" />
+    </mxCell>
+    <mxCell id="in-kv-shape" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[B,N,Dh]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="80" x="955" y="250" as="geometry" />
+    </mxCell>
+    <mxCell id="e-kv" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="960" y="290" as="sourcePoint" />
+        <mxPoint x="960" y="340" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="t-kv" edge="1" parent="ov-1" style="endArrow=none;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="953" y="320" as="sourcePoint" />
+        <mxPoint x="963" y="310" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- topk_idxs from top -->
+    <mxCell id="in-topk-dtype" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;INT64&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="60" x="1040" y="230" as="geometry" />
+    </mxCell>
+    <mxCell id="in-topk-name" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;topk_idxs&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="100" x="1020" y="260" as="geometry" />
+    </mxCell>
+    <mxCell id="in-topk-shape" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[B,S,K]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="70" x="1110" y="250" as="geometry" />
+    </mxCell>
+    <mxCell id="e-topk" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="1070" y="290" as="sourcePoint" />
+        <mxPoint x="1070" y="340" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="t-topk" edge="1" parent="ov-1" style="endArrow=none;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="1063" y="320" as="sourcePoint" />
+        <mxPoint x="1073" y="310" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- attn_sink from right -->
+    <mxCell id="in-sink-dtype" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;FP32&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="60" x="1190" y="370" as="geometry" />
+    </mxCell>
+    <mxCell id="in-sink-name" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;attn_sink&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="100" x="1165" y="400" as="geometry" />
+    </mxCell>
+    <mxCell id="in-sink-shape" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[H]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="40" x="1250" y="395" as="geometry" />
+    </mxCell>
+    <mxCell id="e-sink" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="1200" y="430" as="sourcePoint" />
+        <Array as="points">
+          <mxPoint x="1160" y="430" />
+          <mxPoint x="1160" y="480" />
+        </Array>
+        <mxPoint x="1120" y="480" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="t-sink" edge="1" parent="ov-1" style="endArrow=none;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="1190" y="438" as="sourcePoint" />
+        <mxPoint x="1200" y="428" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- ====== INTERNAL ARROWS ====== -->
+
+    <!-- _query_up → Sparse Attention (q) -->
+    <mxCell id="e-qu-sa" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="760" y="480" as="sourcePoint" />
+        <mxPoint x="920" y="480" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="lbl-qu-sa" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;q&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="30" x="830" y="455" as="geometry" />
+    </mxCell>
+    <mxCell id="lbl-qu-sa-shape" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[B,S,H,Dh]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="100" x="795" y="487" as="geometry" />
+    </mxCell>
+    <mxCell id="t-qu-sa" edge="1" parent="ov-1" style="endArrow=none;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="835" y="488" as="sourcePoint" />
+        <mxPoint x="845" y="478" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- Sparse Attention → RoPE inverse (o_raw) -->
+    <mxCell id="e-sa-irope" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="1120" y="480" as="sourcePoint" />
+        <mxPoint x="1300" y="480" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="lbl-sa-irope" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;o_raw&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="60" x="1180" y="455" as="geometry" />
+    </mxCell>
+    <mxCell id="t-sa-irope" edge="1" parent="ov-1" style="endArrow=none;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="1230" y="488" as="sourcePoint" />
+        <mxPoint x="1240" y="478" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- freqs_cis feedback to RoPE inverse -->
+    <mxCell id="wp-fc" parent="ov-1" style="shape=waypoint;sketch=0;size=6;pointerEvents=1;points=[];fillColor=none;resizable=0;rotatable=0;perimeter=centerPerimeter;snapToPoint=1;" value="" vertex="1">
+      <mxGeometry height="20" width="20" x="510" y="585" as="geometry" />
+    </mxCell>
+    <mxCell id="e-fc-irope" edge="1" parent="ov-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="520" y="595" />
+          <mxPoint x="520" y="730" />
+          <mxPoint x="1360" y="730" />
+        </Array>
+        <mxPoint x="510" y="595" as="sourcePoint" />
+        <mxPoint x="1360" y="545" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="lbl-fc-irope" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;freqs_cis&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="80" x="900" y="710" as="geometry" />
+    </mxCell>
+
+    <!-- ====== OUTPUT ====== -->
+    <mxCell id="out-dtype" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;FP32&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="60" x="1550" y="450" as="geometry" />
+    </mxCell>
+    <mxCell id="out-name" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;o&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="30" x="1565" y="480" as="geometry" />
+    </mxCell>
+    <mxCell id="out-shape" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[B,S,H,Dh]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="100" x="1600" y="477" as="geometry" />
+    </mxCell>
+    <mxCell id="e-out" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="1420" y="480" as="sourcePoint" />
+        <mxPoint x="1600" y="480" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="t-out" edge="1" parent="ov-1" style="endArrow=none;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="1530" y="488" as="sourcePoint" />
+        <mxPoint x="1540" y="478" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- SECTION 1 TITLE -->
+    <mxCell id="sec1-title" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 72px;&quot;&gt;&lt;b&gt;Block diagram of QCAU&lt;/b&gt;&lt;/font&gt;" vertex="1">
+      <mxGeometry height="40" width="1100" x="500" y="770" as="geometry" />
+    </mxCell>
+
+
+    <!-- ================================================================== -->
+    <!-- SECTION 2: DETAIL OF _query_up                                     -->
+    <!-- ================================================================== -->
+
+    <!-- Outer container -->
+    <mxCell id="qu-d-box" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;strokeWidth=5;" value="" vertex="1">
+      <mxGeometry height="590" width="1200" x="200" y="900" as="geometry" />
+    </mxCell>
+    <mxCell id="qu-d-title" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 24px;&quot;&gt;_query_up&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="120" x="220" y="905" as="geometry" />
+    </mxCell>
+
+    <!-- Sub-block: Linear / Matmul (W_UQ) -->
+    <mxCell id="qu-linear" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;" value="&lt;font style=&quot;font-size: 20px;&quot;&gt;MatMul&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 16px;&quot;&gt;c_q @ W_UQ.T&lt;/font&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="120" width="150" x="350" y="1020" as="geometry" />
+    </mxCell>
+
+    <!-- Sub-block: Unflatten -->
+    <mxCell id="qu-unflatten" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;" value="&lt;font style=&quot;font-size: 20px;&quot;&gt;Unflatten&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 14px;&quot;&gt;(H*Dh)→(H,Dh)&lt;/font&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="80" width="150" x="600" y="1040" as="geometry" />
+    </mxCell>
+
+    <!-- Sub-block: RMSNorm -->
+    <mxCell id="qu-rmsnorm" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="&lt;font style=&quot;font-size: 20px;&quot;&gt;RMSNorm&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 14px;&quot;&gt;(per-head)&lt;/font&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="80" width="150" x="850" y="1040" as="geometry" />
+    </mxCell>
+
+    <!-- Sub-block: RoPE forward -->
+    <mxCell id="qu-rope" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="&lt;font style=&quot;font-size: 20px;&quot;&gt;RoPE&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 14px;&quot;&gt;(forward)&lt;/font&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="80" width="150" x="1100" y="1040" as="geometry" />
+    </mxCell>
+
+    <!-- _query_up inputs -->
+    <!-- c_q input -->
+    <mxCell id="qu-in-cq-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;c_q&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="60" x="140" y="1025" as="geometry" />
+    </mxCell>
+    <mxCell id="qu-in-cq-dt" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[B,S,D_C]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="80" x="130" y="1055" as="geometry" />
+    </mxCell>
+    <mxCell id="qu-e-cq" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="200" y="1050" as="sourcePoint" />
+        <mxPoint x="350" y="1050" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="qu-t-cq" edge="1" parent="ov-1" style="endArrow=none;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="260" y="1058" as="sourcePoint" />
+        <mxPoint x="270" y="1048" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- w_uq input -->
+    <mxCell id="qu-in-wuq-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;w_uq&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="60" x="140" y="1095" as="geometry" />
+    </mxCell>
+    <mxCell id="qu-in-wuq-dt" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[H*Dh, D_C]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="100" x="120" y="1125" as="geometry" />
+    </mxCell>
+    <mxCell id="qu-e-wuq" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="200" y="1110" as="sourcePoint" />
+        <mxPoint x="350" y="1110" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="qu-t-wuq" edge="1" parent="ov-1" style="endArrow=none;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="260" y="1118" as="sourcePoint" />
+        <mxPoint x="270" y="1108" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- q_head_norm_weight input to RMSNorm -->
+    <mxCell id="qu-in-gamma-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;γ (q_head_norm_wt)&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="180" x="835" y="950" as="geometry" />
+    </mxCell>
+    <mxCell id="qu-in-gamma-dt" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[H, Dh]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="60" x="895" y="980" as="geometry" />
+    </mxCell>
+    <mxCell id="qu-e-gamma" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="925" y="1000" as="sourcePoint" />
+        <mxPoint x="925" y="1040" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- freqs_cis input to RoPE -->
+    <mxCell id="qu-in-freq-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;freqs_cis&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="100" x="1125" y="950" as="geometry" />
+    </mxCell>
+    <mxCell id="qu-in-freq-dt" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[S, Dh_r/2]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="100" x="1125" y="980" as="geometry" />
+    </mxCell>
+    <mxCell id="qu-e-freq" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="1175" y="1000" as="sourcePoint" />
+        <mxPoint x="1175" y="1040" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- Internal arrows: Linear → Unflatten -->
+    <mxCell id="qu-e-lin-unf" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="500" y="1080" as="sourcePoint" />
+        <mxPoint x="600" y="1080" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="qu-lbl-lin-unf" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[B,S,H*Dh]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="90" x="510" y="1060" as="geometry" />
+    </mxCell>
+
+    <!-- Internal arrows: Unflatten → RMSNorm -->
+    <mxCell id="qu-e-unf-rms" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="750" y="1080" as="sourcePoint" />
+        <mxPoint x="850" y="1080" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="qu-lbl-unf-rms" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[B,S,H,Dh]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="90" x="755" y="1060" as="geometry" />
+    </mxCell>
+
+    <!-- Internal arrows: RMSNorm → RoPE -->
+    <mxCell id="qu-e-rms-rope" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="1000" y="1080" as="sourcePoint" />
+        <mxPoint x="1100" y="1080" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="qu-lbl-rms-rope" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[B,S,H,Dh]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="90" x="1005" y="1060" as="geometry" />
+    </mxCell>
+
+    <!-- Output: q -->
+    <mxCell id="qu-out-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;q&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="30" x="1430" y="1065" as="geometry" />
+    </mxCell>
+    <mxCell id="qu-out-dt" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[B,S,H,Dh]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="100" x="1420" y="1090" as="geometry" />
+    </mxCell>
+    <mxCell id="qu-e-out" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="1250" y="1080" as="sourcePoint" />
+        <mxPoint x="1400" y="1080" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="qu-t-out" edge="1" parent="ov-1" style="endArrow=none;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="1360" y="1088" as="sourcePoint" />
+        <mxPoint x="1370" y="1078" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- RMSNorm detail inside _query_up -->
+    <!-- x² block -->
+    <mxCell id="qu-rms-sq" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;x²&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="40" x="370" y="1220" as="geometry" />
+    </mxCell>
+    <!-- mean block -->
+    <mxCell id="qu-rms-mean" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;mean&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 12px;&quot;&gt;(dim=-1)&lt;/font&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="40" width="70" x="450" y="1215" as="geometry" />
+    </mxCell>
+    <!-- +eps -->
+    <mxCell id="qu-rms-eps" parent="ov-1" style="ellipse;whiteSpace=wrap;html=1;shapeInside=1;" value="+" vertex="1">
+      <mxGeometry height="20" width="20" x="560" y="1225" as="geometry" />
+    </mxCell>
+    <mxCell id="qu-rms-eps-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;ε&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="20" x="560" y="1200" as="geometry" />
+    </mxCell>
+    <!-- rsqrt -->
+    <mxCell id="qu-rms-rsqrt" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;rsqrt&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="50" x="620" y="1220" as="geometry" />
+    </mxCell>
+    <!-- multiply x*rms -->
+    <mxCell id="qu-rms-mul1" parent="ov-1" style="ellipse;whiteSpace=wrap;html=1;shapeInside=1;" value="X" vertex="1">
+      <mxGeometry height="20" width="20" x="710" y="1225" as="geometry" />
+    </mxCell>
+    <!-- multiply by gamma -->
+    <mxCell id="qu-rms-mul2" parent="ov-1" style="ellipse;whiteSpace=wrap;html=1;shapeInside=1;" value="X" vertex="1">
+      <mxGeometry height="20" width="20" x="780" y="1225" as="geometry" />
+    </mxCell>
+    <mxCell id="qu-rms-gamma-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;γ&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="20" x="780" y="1200" as="geometry" />
+    </mxCell>
+
+    <!-- RMSNorm detail arrows -->
+    <mxCell id="qu-rms-e1" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="280" y="1235" as="sourcePoint" />
+        <mxPoint x="370" y="1235" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="qu-rms-in-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;x&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="20" x="300" y="1215" as="geometry" />
+    </mxCell>
+    <!-- x bypass to multiply -->
+    <mxCell id="qu-rms-wp" parent="ov-1" style="shape=waypoint;sketch=0;size=6;pointerEvents=1;points=[];fillColor=none;resizable=0;rotatable=0;perimeter=centerPerimeter;snapToPoint=1;" value="" vertex="1">
+      <mxGeometry height="20" width="20" x="330" y="1225" as="geometry" />
+    </mxCell>
+    <mxCell id="qu-rms-e-bypass" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="340" y="1235" />
+          <mxPoint x="340" y="1290" />
+          <mxPoint x="720" y="1290" />
+        </Array>
+        <mxPoint x="340" y="1235" as="sourcePoint" />
+        <mxPoint x="720" y="1245" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="qu-rms-e2" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="410" y="1235" as="sourcePoint" />
+        <mxPoint x="450" y="1235" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="qu-rms-e3" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="520" y="1235" as="sourcePoint" />
+        <mxPoint x="560" y="1235" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="qu-rms-e4" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="580" y="1235" as="sourcePoint" />
+        <mxPoint x="620" y="1235" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="qu-rms-e5" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="670" y="1235" as="sourcePoint" />
+        <mxPoint x="710" y="1235" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="qu-rms-e6" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="730" y="1235" as="sourcePoint" />
+        <mxPoint x="780" y="1235" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="qu-rms-e7" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="800" y="1235" as="sourcePoint" />
+        <mxPoint x="870" y="1235" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="qu-rms-out-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;y&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="20" x="850" y="1215" as="geometry" />
+    </mxCell>
+
+    <!-- RMSNorm detail title -->
+    <mxCell id="qu-rms-title" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot; color=&quot;#82b366&quot;&gt;&lt;i&gt;Detail: RMSNorm (y = x * rsqrt(mean(x²)+ε) * γ)&lt;/i&gt;&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="400" x="350" y="1190" as="geometry" />
+    </mxCell>
+
+    <!-- SECTION 2 TITLE -->
+    <mxCell id="sec2-title" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 72px;&quot;&gt;&lt;b&gt;Block diagram of _query_up&lt;/b&gt;&lt;/font&gt;" vertex="1">
+      <mxGeometry height="40" width="1200" x="200" y="1540" as="geometry" />
+    </mxCell>
+
+
+    <!-- ================================================================== -->
+    <!-- SECTION 3: DETAIL OF _sparse_attention_online                      -->
+    <!-- ================================================================== -->
+
+    <!-- Outer container -->
+    <mxCell id="sa-d-box" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;strokeWidth=5;" value="" vertex="1">
+      <mxGeometry height="700" width="1700" x="200" y="1650" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-d-title" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 24px;&quot;&gt;_sparse_attention_online&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="280" x="220" y="1655" as="geometry" />
+    </mxCell>
+
+    <!-- Inputs -->
+    <mxCell id="sa-in-q-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;q&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="30" x="130" y="1730" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-in-q-dt" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[B,S,H,Dh]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="100" x="100" y="1760" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-e-q" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="170" y="1750" as="sourcePoint" />
+        <mxPoint x="310" y="1750" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="sa-t-q" edge="1" parent="ov-1" style="endArrow=none;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="225" y="1758" as="sourcePoint" />
+        <mxPoint x="235" y="1748" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <mxCell id="sa-in-kv-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;kv&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="40" x="125" y="1830" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-in-kv-dt" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[B,N,Dh]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="90" x="100" y="1860" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-e-kv" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="170" y="1850" as="sourcePoint" />
+        <mxPoint x="310" y="1850" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <mxCell id="sa-in-topk-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;topk_idxs&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="100" x="95" y="1920" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-in-topk-dt" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[B,S,K]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="80" x="105" y="1950" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-e-topk" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="170" y="1940" as="sourcePoint" />
+        <mxPoint x="310" y="1940" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- Tile loop dashed box -->
+    <mxCell id="sa-tile-box" parent="ov-1" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;strokeWidth=2;fillColor=none;strokeColor=#CC6600;" value="" vertex="1">
+      <mxGeometry height="430" width="800" x="300" y="1700" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-tile-title" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 16px;&quot; color=&quot;#CC6600&quot;&gt;&lt;b&gt;Tile Loop&lt;/b&gt; (for tile_base in range(0, K, tile_size))&lt;/font&gt;" vertex="1">
+      <mxGeometry height="25" width="500" x="350" y="1705" as="geometry" />
+    </mxCell>
+
+    <!-- Gather KV tile -->
+    <mxCell id="sa-gather" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;Gather&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 14px;&quot;&gt;kv[topk_idxs_tile]&lt;/font&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="80" width="160" x="320" y="1820" as="geometry" />
+    </mxCell>
+
+    <!-- QK scores (einsum) -->
+    <mxCell id="sa-qk" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;QK Scores&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 14px;&quot;&gt;einsum(bshd,bstd→bsht)&lt;/font&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="80" width="200" x="550" y="1740" as="geometry" />
+    </mxCell>
+
+    <!-- Scale -->
+    <mxCell id="sa-scale" parent="ov-1" style="ellipse;whiteSpace=wrap;html=1;shapeInside=1;" value="X" vertex="1">
+      <mxGeometry height="20" width="20" x="800" y="1770" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-scale-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;1/√Dh&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="50" x="785" y="1745" as="geometry" />
+    </mxCell>
+
+    <!-- Online softmax block -->
+    <mxCell id="sa-softmax" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;Online Softmax&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 12px;&quot;&gt;max-tracking&lt;/font&gt;&lt;/div&gt;&lt;div&gt;&lt;font style=&quot;font-size: 12px;&quot;&gt;rescale acc_o&lt;/font&gt;&lt;/div&gt;&lt;div&gt;&lt;font style=&quot;font-size: 12px;&quot;&gt;exp(s−m_new)&lt;/font&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="120" width="160" x="860" y="1740" as="geometry" />
+    </mxCell>
+
+    <!-- Weighted V sum -->
+    <mxCell id="sa-wv" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;Weighted V&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 14px;&quot;&gt;einsum(bsht,bstd→bshd)&lt;/font&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="80" width="200" x="550" y="1880" as="geometry" />
+    </mxCell>
+
+    <!-- Accumulate acc_o -->
+    <mxCell id="sa-acc" parent="ov-1" style="ellipse;whiteSpace=wrap;html=1;shapeInside=1;" value="+" vertex="1">
+      <mxGeometry height="20" width="20" x="800" y="1910" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-acc-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;acc_o&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="50" x="825" y="1905" as="geometry" />
+    </mxCell>
+
+    <!-- Accumulate sum_exp -->
+    <mxCell id="sa-sum-exp" parent="ov-1" style="ellipse;whiteSpace=wrap;html=1;shapeInside=1;" value="+" vertex="1">
+      <mxGeometry height="20" width="20" x="800" y="1985" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-sum-exp-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;sum_exp&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="60" x="825" y="1980" as="geometry" />
+    </mxCell>
+
+    <!-- Tile loop internal arrows -->
+    <mxCell id="sa-e-g-qk" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="480" y="1850" as="sourcePoint" />
+        <Array as="points">
+          <mxPoint x="520" y="1850" />
+          <mxPoint x="520" y="1790" />
+        </Array>
+        <mxPoint x="550" y="1790" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="sa-e-g-wv" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="480" y="1870" as="sourcePoint" />
+        <Array as="points">
+          <mxPoint x="520" y="1870" />
+          <mxPoint x="520" y="1910" />
+        </Array>
+        <mxPoint x="550" y="1910" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="sa-lbl-kvtile" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;kv_tile&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="60" x="485" y="1830" as="geometry" />
+    </mxCell>
+    <!-- q to QK -->
+    <mxCell id="sa-e-q-qk" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="400" y="1750" as="sourcePoint" />
+        <mxPoint x="550" y="1750" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <!-- QK → scale -->
+    <mxCell id="sa-e-qk-sc" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="750" y="1780" as="sourcePoint" />
+        <mxPoint x="800" y="1780" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <!-- scale → online softmax -->
+    <mxCell id="sa-e-sc-sm" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="820" y="1780" as="sourcePoint" />
+        <mxPoint x="860" y="1780" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <!-- online softmax probs → weighted V -->
+    <mxCell id="sa-e-sm-wv" edge="1" parent="ov-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="940" y="1880" />
+          <mxPoint x="940" y="1940" />
+          <mxPoint x="750" y="1940" />
+        </Array>
+        <mxPoint x="940" y="1860" as="sourcePoint" />
+        <mxPoint x="750" y="1920" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="sa-lbl-probs" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;probs&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="50" x="940" y="1880" as="geometry" />
+    </mxCell>
+    <!-- weighted V → acc_o -->
+    <mxCell id="sa-e-wv-acc" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="750" y="1920" as="sourcePoint" />
+        <mxPoint x="800" y="1920" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <!-- Online softmax also accumulates the probability denominator. -->
+    <mxCell id="sa-e-sm-sum" edge="1" parent="ov-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1040" y="1850" />
+          <mxPoint x="1040" y="2010" />
+          <mxPoint x="810" y="2010" />
+        </Array>
+        <mxPoint x="1020" y="1850" as="sourcePoint" />
+        <mxPoint x="810" y="1995" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- End of tile loop -->
+
+    <!-- Sink term block -->
+    <mxCell id="sa-sink" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;Sink Term&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 14px;&quot;&gt;exp(attn_sink − m)&lt;/font&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="70" width="170" x="1150" y="1780" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-in-sinkt-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;attn_sink&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="100" x="1155" y="1730" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-e-sinkt" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="1235" y="1760" as="sourcePoint" />
+        <mxPoint x="1235" y="1780" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- Add sink to sum_exp -->
+    <mxCell id="sa-sink-add" parent="ov-1" style="ellipse;whiteSpace=wrap;html=1;shapeInside=1;" value="+" vertex="1">
+      <mxGeometry height="20" width="20" x="1370" y="1850" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-e-sink-add" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="1320" y="1815" as="sourcePoint" />
+        <mxPoint x="1370" y="1860" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <!-- Add the online denominator to the sink term before normalization. -->
+    <mxCell id="sa-e-sum-sink-add" edge="1" parent="ov-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=classic;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="1100" y="1995" />
+          <mxPoint x="1100" y="1860" />
+        </Array>
+        <mxPoint x="820" y="1995" as="sourcePoint" />
+        <mxPoint x="1370" y="1860" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- Normalize block -->
+    <mxCell id="sa-norm" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;Normalize&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 14px;&quot;&gt;acc_o / sum_exp&lt;/font&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="70" width="160" x="1430" y="1890" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-e-acc-norm" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="820" y="1920" as="sourcePoint" />
+        <mxPoint x="1430" y="1920" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="sa-lbl-acc-norm" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;acc_o [B,S,H,Dh]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="130" x="1130" y="1900" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-e-sum-norm" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="1390" y="1860" as="sourcePoint" />
+        <Array as="points">
+          <mxPoint x="1410" y="1860" />
+          <mxPoint x="1410" y="1940" />
+        </Array>
+        <mxPoint x="1430" y="1940" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="sa-lbl-sum-norm" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;sum_exp+sink&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="100" x="1350" y="1870" as="geometry" />
+    </mxCell>
+
+    <!-- Output o -->
+    <mxCell id="sa-out-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;o&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="30" x="1750" y="1910" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-out-dt" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[B,S,H,Dh]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="100" x="1740" y="1940" as="geometry" />
+    </mxCell>
+    <mxCell id="sa-e-out" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="1590" y="1925" as="sourcePoint" />
+        <mxPoint x="1750" y="1925" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="sa-t-out" edge="1" parent="ov-1" style="endArrow=none;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="1700" y="1933" as="sourcePoint" />
+        <mxPoint x="1710" y="1923" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- SECTION 3 TITLE -->
+    <mxCell id="sec3-title" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 72px;&quot;&gt;&lt;b&gt;Block diagram of _sparse_attention_online&lt;/b&gt;&lt;/font&gt;" vertex="1">
+      <mxGeometry height="40" width="1700" x="200" y="2380" as="geometry" />
+    </mxCell>
+
+
+    <!-- ================================================================== -->
+    <!-- SECTION 4: DETAIL OF _apply_rotary_emb                             -->
+    <!-- ================================================================== -->
+
+    <!-- Outer container -->
+    <mxCell id="rope-d-box" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;strokeWidth=5;" value="" vertex="1">
+      <mxGeometry height="500" width="1400" x="200" y="2500" as="geometry" />
+    </mxCell>
+    <mxCell id="rope-d-title" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 24px;&quot;&gt;_apply_rotary_emb&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="220" x="220" y="2505" as="geometry" />
+    </mxCell>
+
+    <!-- Input x -->
+    <mxCell id="rope-in-x-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;x&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="30" x="130" y="2670" as="geometry" />
+    </mxCell>
+    <mxCell id="rope-in-x-dt" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[B,S,H,D]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="90" x="100" y="2700" as="geometry" />
+    </mxCell>
+    <mxCell id="rope-e-x" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="170" y="2690" as="sourcePoint" />
+        <mxPoint x="300" y="2690" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="rope-t-x" edge="1" parent="ov-1" style="endArrow=none;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="225" y="2698" as="sourcePoint" />
+        <mxPoint x="235" y="2688" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- Input freqs_cis -->
+    <mxCell id="rope-in-fc-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;freqs_cis&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="100" x="700" y="2540" as="geometry" />
+    </mxCell>
+    <mxCell id="rope-in-fc-dt" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[S, n_pairs] complex&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="150" x="675" y="2570" as="geometry" />
+    </mxCell>
+
+    <!-- Split block -->
+    <mxCell id="rope-split" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;Split&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 14px;&quot;&gt;x[...,:−Dh_r] | x[...,−Dh_r:]&lt;/font&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="80" width="200" x="300" y="2650" as="geometry" />
+    </mxCell>
+
+    <!-- Passthrough path (non-rotary dims) -->
+    <mxCell id="rope-pass-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;passthrough&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="90" x="530" y="2640" as="geometry" />
+    </mxCell>
+    <mxCell id="rope-e-pass" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="500" y="2665" as="sourcePoint" />
+        <Array as="points">
+          <mxPoint x="1100" y="2665" />
+        </Array>
+        <mxPoint x="1100" y="2665" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- Tail path -->
+    <mxCell id="rope-tail-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;tail [Dh_r]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="90" x="530" y="2720" as="geometry" />
+    </mxCell>
+    <mxCell id="rope-e-tail" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="500" y="2720" as="sourcePoint" />
+        <mxPoint x="600" y="2720" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- view_as_complex -->
+    <mxCell id="rope-complex" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;unflatten→&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 16px;&quot;&gt;view_as_complex&lt;/font&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="60" width="170" x="600" y="2695" as="geometry" />
+    </mxCell>
+
+    <!-- Complex multiply -->
+    <mxCell id="rope-cmul" parent="ov-1" style="ellipse;whiteSpace=wrap;html=1;shapeInside=1;" value="X" vertex="1">
+      <mxGeometry height="20" width="20" x="810" y="2715" as="geometry" />
+    </mxCell>
+    <mxCell id="rope-cmul-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;complex ×&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="80" x="780" y="2740" as="geometry" />
+    </mxCell>
+
+    <!-- freqs_cis → cmul -->
+    <mxCell id="rope-e-fc-cmul" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="820" y="2590" as="sourcePoint" />
+        <mxPoint x="820" y="2715" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <!-- conj? label -->
+    <mxCell id="rope-conj-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;(conj if inverse)&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="120" x="830" y="2650" as="geometry" />
+    </mxCell>
+
+    <!-- view_as_complex → cmul -->
+    <mxCell id="rope-e-cplx-cmul" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="770" y="2725" as="sourcePoint" />
+        <mxPoint x="810" y="2725" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- view_as_real + flatten -->
+    <mxCell id="rope-real" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;view_as_real→&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 16px;&quot;&gt;flatten&lt;/font&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="60" width="150" x="880" y="2695" as="geometry" />
+    </mxCell>
+    <mxCell id="rope-e-cmul-real" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="830" y="2725" as="sourcePoint" />
+        <mxPoint x="880" y="2725" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- Concat block -->
+    <mxCell id="rope-concat" parent="ov-1" style="rounded=0;whiteSpace=wrap;html=1;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;Concat&lt;/font&gt;&lt;div&gt;&lt;font style=&quot;font-size: 14px;&quot;&gt;[pass | rotated]&lt;/font&gt;&lt;/div&gt;" vertex="1">
+      <mxGeometry height="80" width="150" x="1100" y="2650" as="geometry" />
+    </mxCell>
+    <mxCell id="rope-e-real-concat" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="1030" y="2725" as="sourcePoint" />
+        <Array as="points">
+          <mxPoint x="1060" y="2725" />
+          <mxPoint x="1060" y="2710" />
+        </Array>
+        <mxPoint x="1100" y="2710" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- Output -->
+    <mxCell id="rope-out-lbl" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 18px;&quot;&gt;out&lt;/font&gt;" vertex="1">
+      <mxGeometry height="30" width="40" x="1430" y="2675" as="geometry" />
+    </mxCell>
+    <mxCell id="rope-out-dt" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;[B,S,H,D]&lt;/font&gt;" vertex="1">
+      <mxGeometry height="20" width="90" x="1415" y="2705" as="geometry" />
+    </mxCell>
+    <mxCell id="rope-e-out" edge="1" parent="ov-1" style="endArrow=classic;html=1;rounded=0;" value="">
+      <mxGeometry relative="1" as="geometry">
+        <mxPoint x="1250" y="2690" as="sourcePoint" />
+        <mxPoint x="1430" y="2690" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="rope-t-out" edge="1" parent="ov-1" style="endArrow=none;html=1;rounded=0;" value="">
+      <mxGeometry height="50" relative="1" width="50" as="geometry">
+        <mxPoint x="1380" y="2698" as="sourcePoint" />
+        <mxPoint x="1390" y="2688" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+
+    <!-- Inverse label -->
+    <mxCell id="rope-inverse-note" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 14px;&quot; color=&quot;#6c8ebf&quot;&gt;&lt;i&gt;Forward: freqs as-is&lt;br&gt;Inverse: freqs = conj(freqs_cis)&lt;/i&gt;&lt;/font&gt;" vertex="1">
+      <mxGeometry height="40" width="250" x="300" y="2830" as="geometry" />
+    </mxCell>
+
+    <!-- SECTION 4 TITLE -->
+    <mxCell id="sec4-title" parent="ov-1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="&lt;font style=&quot;font-size: 72px;&quot;&gt;&lt;b&gt;Block diagram of _apply_rotary_emb&lt;/b&gt;&lt;/font&gt;" vertex="1">
+      <mxGeometry height="40" width="1400" x="200" y="3050" as="geometry" />
+    </mxCell>
+
+  </root>
+</mxGraphModel>

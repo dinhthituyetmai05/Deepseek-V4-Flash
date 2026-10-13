@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepSeek-V4-Pro — Dataflow diagram end-to-end (interactive)</title>
+<style>
+  :root{
+    --bg:#0d1117;--panel:#161b22;--panel2:#1c2330;--line:#2a3340;--txt:#e6edf3;--mut:#8b97a6;--acc:#58a6ff;
+    --mhc:#a78bfa;--csa:#22c55e;--hca:#06b6d4;--moe:#f97316;--sel:#eab308;--proj:#3b82f6;--out:#ef4444;
+    --state:#64748b;--io:#14b8a6;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px}
+  .wrap{max-width:1560px;margin:0 auto;padding:18px 20px 60px}
+  h1{font-size:20px;margin:0 0 3px}
+  .sub{color:var(--mut);font-size:13px;margin:0 0 14px}
+
+  /* ---- tokenize panel ---- */
+  .tokpanel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+  .tp-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .tp-row input[type=text]{flex:1;min-width:280px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+    color:var(--txt);padding:9px 12px;font-size:13.5px;outline:none}
+  .tp-row input[type=text]:focus{border-color:var(--acc)}
+  .lab{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--mut);font-weight:700;margin:14px 0 6px}
+  .pipe3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:6px}
+  .pcol{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 11px;min-height:104px}
+  .pcol .ph{font-size:11px;color:var(--mut);font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:7px}
+  .pcol .ph b{color:var(--io)}
+  .chips{display:flex;flex-wrap:wrap;gap:4px}
+  .tk{background:#0a0e14;border:1px solid var(--line);border-radius:5px;padding:2px 6px;font-family:var(--mono);font-size:11.5px;cursor:default}
+  .tk .id{color:var(--mut);font-size:10px;margin-left:4px}
+  .tk:hover{border-color:var(--io)}
+  .emrows{display:flex;flex-direction:column;gap:3px}
+  .emrow{display:flex;align-items:center;gap:4px}
+  .emrow .nm{font-family:var(--mono);font-size:10.5px;color:var(--mut);width:52px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cellv{width:13px;height:13px;border-radius:2px}
+  .emrow .rest{font-family:var(--mono);font-size:10px;color:var(--mut);margin-left:3px}
+  .shapebig{font-family:var(--mono);font-size:15px;color:var(--acc);font-weight:700}
+  .note{font-size:11.5px;color:var(--mut);margin-top:8px}
+
+  /* ---- controls ---- */
+  .bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0 8px}
+  .toggle{display:inline-flex;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:3px}
+  .toggle button{background:none;border:0;color:var(--mut);padding:7px 12px;border-radius:7px;cursor:pointer;font-size:12.5px;font-weight:600}
+  .toggle button.on{background:var(--acc);color:#06121f}
+  .btn{background:var(--panel);border:1px solid var(--line);color:var(--txt);padding:7px 13px;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600}
+  .btn:hover{border-color:var(--acc)} .btn.primary{background:var(--acc);color:#06121f;border-color:var(--acc)}
+  label.ck{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--mut);cursor:pointer}
+  .hint{color:var(--mut);font-size:12.5px}
+  .layers{display:flex;flex-wrap:wrap;gap:3px;margin:6px 0 10px}
+  .lyr{width:26px;height:24px;border-radius:5px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;
+    font-size:10px;font-family:var(--mono);cursor:pointer;color:#0d1117;font-weight:700;opacity:.8;position:relative}
+  .lyr.csa{background:var(--csa)} .lyr.hca{background:var(--hca)}
+  .lyr.sel{outline:2px solid #fff;outline-offset:1px;opacity:1}
+  .lyr .h{position:absolute;top:-3px;right:-3px;width:7px;height:7px;border-radius:50%;background:var(--moe);border:1px solid var(--bg)}
+  .legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--mut);margin:8px 0}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .sw{width:12px;height:12px;border-radius:3px;display:inline-block;border:1px solid rgba(0,0,0,.2)}
+
+  /* ---- stage ---- */
+  .stage{display:flex;gap:16px;align-items:flex-start}
+  .canvas{flex:1;min-width:0}
+  svg{width:100%;height:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+  .panel{width:350px;flex-shrink:0;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 15px;position:sticky;top:12px;min-height:320px}
+  .panel h3{margin:0 0 2px;font-size:15px}
+  .panel .tag{display:inline-block;font-family:var(--mono);font-size:10px;padding:1px 6px;border-radius:4px;color:#0d1117;font-weight:700;margin-bottom:8px}
+  .io{font-family:var(--mono);font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 9px;margin:4px 0;color:#c9d4e0}
+  .io b{color:#fff} .io .sh{color:var(--acc)}
+  .formula{background:#0a0e14;border:1px solid var(--line);border-radius:7px;padding:9px 11px;font-family:var(--mono);
+    font-size:12px;color:#a9e1c4;white-space:pre-wrap;overflow-x:auto;margin-top:4px}
+  .kv{font-family:var(--mono);font-size:12px;color:var(--mut);margin-top:8px}
+  .kv b{color:var(--txt)}
+
+  /* svg */
+  .blk{stroke-width:2;cursor:pointer}
+  .blk.sel{stroke:#fff!important;stroke-width:3}
+  .blk-t{font-weight:700;font-size:12px;fill:#fff;pointer-events:none}
+  .blk-s{font-size:10px;fill:#c9d4e0;pointer-events:none}
+  .grp{fill:none;stroke:#2a3340;stroke-width:1.5;stroke-dasharray:6 4}
+  .grp-t{font-size:11px;fill:#8b97a6;font-weight:700;letter-spacing:.05em}
+  .lvl-t{font-size:10px;fill:#5a6675;font-family:var(--mono);font-weight:700}
+  .wire{fill:none}
+  .wlbl{font-size:9.5px;font-family:var(--mono)}
+  .wlbl-bg{fill:#0d1117;opacity:.82}
+  footer{margin-top:22px;color:var(--mut);font-size:12px;border-top:1px solid var(--line);padding-top:12px}
+  @media(max-width:1100px){.stage{flex-direction:column}.panel{width:100%;position:static}.pipe3{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>DeepSeek-V4-Pro — Dataflow diagram end-to-end</h1>
+  <p class="sub">Message của user → token hoá → embedding → nạp vào từng khối tính toán → vòng lặp 61 block → LM head → token ra. Bấm vào một khối để xem phép toán và tensor I/O. Bấm <b>▶ Chạy dòng dữ liệu</b> để xem data chảy trên từng đường.</p>
+
+  <!-- ============ TOKENIZE / EMBED PANEL ============ -->
+  <div class="tokpanel">
+    <div class="tp-row">
+      <span class="hint" style="font-weight:700;color:var(--txt)">Message đầu vào:</span>
+      <input type="text" id="msgIn" value="Thiết kế vi mạch số cho bộ tăng tốc AI.">
+      <button class="btn" id="chunkBtn">Dùng chunk đầy đủ 256 token</button>
+    </div>
+
+    <div class="pipe3">
+      <div class="pcol">
+        <div class="ph">① Tokenizer (BPE) → <b>token_ids</b></div>
+        <div class="chips" id="tokChips"></div>
+        <div class="note" id="tokNote"></div>
+      </div>
+      <div class="pcol">
+        <div class="ph">② Embedding lookup <b>W_emb (128000, 7168)</b></div>
+        <div class="emrows" id="embRows"></div>
+        <div class="note">Mỗi token_id → 1 hàng của W_emb = vector 7168 chiều (hiển thị 10 dim đầu).</div>
+      </div>
+      <div class="pcol">
+        <div class="ph">③ Tensor nạp vào mạng</div>
+        <div style="margin-top:6px">
+          <div class="note" style="margin:0">token_ids</div>
+          <div class="shapebig" id="shpTok"></div>
+          <div class="note" style="margin-top:8px">H₀ sau Embedding (BF16)</div>
+          <div class="shapebig" id="shpEmb"></div>
+          <div class="note" style="margin-top:8px">X₀ sau mHC expand (n_hc=4)</div>
+          <div class="shapebig" id="shpX0"></div>
+        </div>
+      </div>
+    </div>
+    <div class="note">Tokenizer ở đây là <b>minh hoạ</b> (tách subword + ID băm tất định); BPE thật của DeepSeek cho chuỗi ID khác, nhưng shape tensor và dataflow không đổi.</div>
+  </div>
+
+  <!-- ============ CONTROLS ============ -->
+  <div class="bar">
+    <div class="toggle" id="scenT">
+      <button data-s="msg" class="on">Prefill — message của bạn</button>
+      <button data-s="chunk">Prefill — chunk 256</button>
+      <button data-s="decode">Decode — 1 token</button>
+    </div>
+    <button class="btn primary" id="playBtn">▶ Chạy dòng dữ liệu</button>
+    <label class="ck"><input type="checkbox" id="wlblCk" checked> Nhãn tensor trên đường</label>
+    <span class="hint" id="layerInfo"></span>
+  </div>
+  <div class="layers" id="layers"></div>
+
+  <div class="legend">
+    <span><i class="sw" style="background:var(--io)"></i>I/O · tokenize · embed</span>
+    <span><i class="sw" style="background:var(--mhc)"></i>mHC / residual</span>
+    <span><i class="sw" style="background:var(--csa)"></i>CSA attention</span>
+    <span><i class="sw" style="background:var(--hca)"></i>HCA attention</span>
+    <span><i class="sw" style="background:var(--sel)"></i>index / route / select</span>
+    <span><i class="sw" style="background:var(--proj)"></i>projection</span>
+    <span><i class="sw" style="background:var(--moe)"></i>MoE expert</span>
+    <span><i class="sw" style="background:var(--out)"></i>output head</span>
+  </div>
+
+  <div class="stage">
+    <div class="canvas"><svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
+    <div class="panel" id="panel"><p class="hint">← Bấm vào một khối trong sơ đồ để xem phép toán, tensor đầu vào và đầu ra.</p></div>
+  </div>
+
+  <footer>
+    Số liệu tensor theo <code>01_Background/DeepSeek_V4_Architecture_Detailed.md</code> (V4-Pro: L=61, d=7168, n_h=128, c=512, MoE 1+384 top-6, d_ff=3072).
+    Định tuyến đường nối góc vuông (A*, jump-arc) theo chuẩn <code>hw-diagram</code>. Nhãn trên đường = shape tensor truyền qua.
+  </footer>
+</div>
+
+<script>
+/* ================= CONFIG ================= */
+const CFG={d:7168,V:128000,L:61,n_hc:4,n_h:128,c:512,d_c:1536,rope:64,
+  csa:{m:4,n_I_h:64,c_I:128,topk:1024},hca:{mp:128},g:16,d_g:1024,n_win:128,
+  moe:{shared:1,routed:384,d_ff:3072,topk:6}};
+let cur='msg', selLayer=3, selBlk=null, showWL=true;
+let TOKENS=[];                       // [{t, id}]
+const DECODE_CTX=4096;
+
+function layerType(l){return l<=2?'hca':(l%2===1?'csa':'hca');}
+function isHash(l){return l<=3;}
+const M=1e6,G=1e9,K=1e3;
+const P=p=>p>=G?(p/G).toFixed(2)+' B':p>=M?(p/M).toFixed(2)+' M':p>=K?(p/K).toFixed(1)+' K':p+'';
+const Bytes=b=>b>=G?(b/G).toFixed(2)+' GB':b>=M?(b/M).toFixed(2)+' MB':b>=K?(b/K).toFixed(1)+' KB':Math.round(b)+' B';
+const HEX={io:'#14b8a6',mhc:'#a78bfa',csa:'#22c55e',hca:'#06b6d4',sel:'#eab308',proj:'#3b82f6',moe:'#f97316',out:'#ef4444',state:'#64748b'};
+
+/* scenario → n (số token đưa vào 1 lần) và ctx (tổng token trong KV cache) */
+function scen(){
+  if(cur==='decode') return {n:1, ctx:DECODE_CTX, mode:'decode'};
+  if(cur==='chunk')  return {n:256, ctx:256, mode:'prefill'};
+  return {n:Math.max(1,TOKENS.length), ctx:Math.max(1,TOKENS.length), mode:'prefill'};
+}
+
+/* ================= TOKENIZER (minh hoạ) ================= */
+function hashId(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}
+  return Math.abs(h)%CFG.V;}
+function tokenize(text){
+  const out=[];
+  const parts=text.match(/\s*[\p{L}\p{N}]+|\s*[^\s\p{L}\p{N}]/gu)||[];
+  parts.forEach(p=>{
+    const lead=p.match(/^\s*/)[0]?'▁':'';   // ▁ = ký hiệu space-prefix như SentencePiece
+    const w=p.trim();
+    if(w.length<=5){ out.push(lead+w); }
+    else{ // tách subword ~4 ký tự
+      for(let i=0;i<w.length;i+=4) out.push((i===0?lead:'')+w.slice(i,i+4));
+    }
+  });
+  return out.map(t=>({t, id:hashId(t)}));
+}
+/* giá trị embedding giả lập tất định để vẽ vector */
+function embVal(id,dim){const x=Math.sin(id*0.0173+dim*1.913)*Math.cos(id*0.0071*(dim+1));return x;}
+function valColor(v){const a=Math.min(1,Math.abs(v));
+  return v>=0?`rgba(20,184,166,${0.18+a*0.8})`:`rgba(239,68,68,${0.18+a*0.8})`;}
+
+function renderTokPanel(){
+  TOKENS=tokenize(document.getElementById('msgIn').value||' ');
+  const S=scen();
+  const chips=document.getElementById('tokChips');
+  chips.innerHTML=TOKENS.slice(0,40).map(x=>
+    `<span class="tk">${x.t.replace(/</g,'&lt;')}<span class="id">${x.id}</span></span>`).join('');
+  document.getElementById('tokNote').textContent=
+    `${TOKENS.length} token` + (TOKENS.length>40?' (hiện 40 đầu)':'') +
+    (cur==='chunk'?'  ·  scenario đang dùng chunk đầy đủ n=256':'') +
+    (cur==='decode'?'  ·  scenario decode chỉ nạp 1 token mới':'');
+
+  const rows=document.getElementById('embRows');
+  rows.innerHTML=TOKENS.slice(0,6).map(x=>{
+    let cells='';
+    for(let dm=0;dm<10;dm++){const v=embVal(x.id,dm);
+      cells+=`<span class="cellv" style="background:${valColor(v)}" title="dim ${dm} = ${v.toFixed(3)}"></span>`;}
+    return `<div class="emrow"><span class="nm" title="${x.t}">${x.t.replace(/</g,'&lt;')}</span>${cells}<span class="rest">… 7168</span></div>`;
+  }).join('') + (TOKENS.length>6?`<div class="note" style="margin-top:4px">… và ${TOKENS.length-6} token còn lại</div>`:'');
+
+  const n=S.n;
+  document.getElementById('shpTok').textContent=`(1, ${n})  int32`;
+  document.getElementById('shpEmb').textContent=`(${n}, 7168)   ${Bytes(n*7168*2)}`;
+  document.getElementById('shpX0').textContent =`(${n}, 4, 7168)   ${Bytes(n*4*7168*2)}`;
+}
+
+/* ================= BUILD DIAGRAM ================= */
+/* ================= ĐỒ THỊ TÍNH TOÁN (node + edge, KHÔNG toạ độ) ================= */
+function graph(){
+  const S=scen(), n=S.n, ctx=S.ctx, d=CFG.d, c=CFG.c, type=layerType(selLayer);
+  const sh=a=>'('+a.join(',')+')';
+  const N=[],E=[];
+  // w ép về bội của 20, h=60 ⇒ tâm cạnh (x+w/2, y+h/2) luôn trên lưới 10
+  const node=(id,cat,title,spec,w,det)=>N.push({id,cat,title,spec,w:Math.round(w/20)*20,h:60,det});
+  const edge=(u,v,label,back)=>E.push({u,v,label,back:!!back});
+  const msgTxt=(document.getElementById('msgIn').value||'').slice(0,22);
+
+  /* ---- front-end ---- */
+  node('msg','io','Message (user)','"'+msgTxt+(msgTxt.length>=22?'…':'')+'"',200,
+    {op:'Văn bản thô do user gửi. Chưa phải tensor.',in:[],out:['text (string)'],bytes:msgTxt.length,prec:'UTF-8',f:'"'+msgTxt+'"'});
+  node('tok','io','① Tokenizer (BPE)','text → token_ids',180,
+    {op:'Tách văn bản thành subword theo từ điển BPE (V = 128 000), ánh xạ mỗi subword thành một số nguyên ID.',
+     in:['text (string)'],out:['token_ids '+sh([1,n])+' int32'],bytes:n*4,prec:'INT32',
+     f:'token_ids ∈ ℤ^(B=1, n) = '+sh([1,n])+'\nvocab V = 128 000'});
+  node('emb','io','② Embedding','W_emb (128000, 7168)',210,
+    {op:'Tra bảng: mỗi token_id chọn 1 HÀNG của W_emb → vector 7168 chiều. Đây là bước biến số nguyên thành tensor số thực.',
+     in:['token_ids '+sh([1,n])],out:['H₀ '+sh([n,d])+' BF16'],bytes:n*d*2,params:CFG.V*d,prec:'BF16',
+     f:'H₀ = W_emb[token_ids]\nshape '+sh([n,d])+' = '+Bytes(n*d*2)+' BF16'});
+  node('mhc0','mhc','③ mHC Expand','n_hc = 4',185,
+    {op:'Nhân bản residual stream: mỗi token từ vector (d) thành mini-tensor (n_hc, d) = (4, 7168). State này chảy xuyên suốt 61 block.',
+     in:['H₀ '+sh([n,d])],out:['X₀ '+sh([n,4,d])],bytes:n*4*d*2,prec:'BF16',
+     f:'X₀ ∈ ℝ^(n, n_hc, d) = '+sh([n,4,d])+'\n= '+Bytes(n*4*d*2)});
+  edge('msg','tok','text');
+  edge('tok','emb',sh([1,n]));
+  edge('emb','mhc0',sh([n,d]));
+
+  /* ---- transformer block ---- */
+  node('Xin','state','X_l','residual state vào block',150,
+    {op:'Trạng thái residual mHC đi vào block l. Block 1: chính là X₀ từ Embedding. Block sau: X ra của block trước.',
+     in:['X₀ / X_{l-1} '+sh([n,4,d])],out:['X_l '+sh([n,4,d])],bytes:n*4*d*2,prec:'BF16',
+     f:'X_l ∈ ℝ^(n, n_hc, d) = '+sh([n,4,d])});
+  node('preA','mhc','Pre-Block mHC','RMSNorm + gating A',195,
+    {op:'RMSNorm trên residual đã flatten (n_hc·d = 28672); sinh gating động A, B, C (ràng buộc Birkhoff, Sinkhorn-Knopp 20 vòng). Gộp 4 nhánh residual thành 1 vector đầu vào attention.',
+     in:['X_l '+sh([n,4,d])],out:['input_a '+sh([n,d])],bytes:n*d*2,params:393e3,prec:'BF16',
+     f:'input_a = A_l · X_l ∈ ℝ^(n,d) = '+sh([n,d])});
+  edge('mhc0','Xin',sh([n,4,d]));
+  edge('Xin','preA',sh([n,4,d]));
+
+  if(type==='csa'){
+    const comp=Math.ceil(ctx/CFG.csa.m), kept=Math.min(CFG.csa.topk,comp),
+          sw=Math.min(CFG.n_win,ctx), aE=kept+sw;
+    node('kv','csa','① KV-Compress','4×(d,c) · m = 4',185,
+      {op:'4 ma trận (d,c) sinh C_a, C_b, Z_a, Z_b ∈ (n, 512); softmax overlapped trên 2m = 8 entry; nén mỗi 4 token KV thành 1 block.',
+       in:['input_a '+sh([n,d])],out:['C^Comp '+sh([comp,c])+' FP8'],bytes:comp*c,params:4*d*c,prec:'FP8',
+       f:'C^Comp ∈ ℝ^(⌈ctx/m⌉, c) = '+sh([comp,c])+'\nctx = '+ctx+' token → '+comp+' block nén'});
+    node('qp','proj','② Query Proj','W_DQ · W_UQ',175,
+      {op:'Down-proj W_DQ (7168, 1536) rồi up-proj W_UQ (1536, 65536); reshape (n_h = 128, c = 512); RoPE lên 64 dim cuối.',
+       in:['input_a '+sh([n,d])],out:['q '+sh([n,CFG.n_h,c])],bytes:n*CFG.n_h*c*2,
+       params:d*CFG.d_c+CFG.d_c*(c*CFG.n_h),prec:'BF16',
+       f:'c_Q = input_a · W_DQ  →  q = c_Q · W_UQ\nq ∈ ℝ^(n, n_h, c) = '+sh([n,CFG.n_h,c])});
+    node('idx','sel','③ Lightning Indexer','FP4 scoring',195,
+      {op:'Chạy FP4: q_I (n, 64 head, 128) dot với K^IComp ('+comp+', 128), ReLU, weighted-sum theo head → chấm điểm MỌI block nén.',
+       in:['input_a '+sh([n,d]),'C^Comp '+sh([comp,c])],out:['I score '+sh([n,comp])+' FP4'],
+       bytes:n*comp*0.5,params:d*CFG.d_c+CFG.d_c*(CFG.csa.c_I*CFG.csa.n_I_h)+d*CFG.csa.n_I_h,prec:'FP4',
+       f:'I_{t,s} = Σ_h w_h · ReLU(q_{I,h} · K^IComp_s)\nscore ∈ '+sh([n,comp])});
+    node('topk','sel','④ Top-k Select','top-1024 + SW',185,
+      {op:'Giữ '+kept+' block điểm cao nhất (top-k = 1024, có '+comp+' ứng viên) + '+sw+' KV cục bộ chưa nén (sliding window).',
+       in:['I score '+sh([n,comp]),'C^Comp '+sh([comp,c])],out:['KV_sparse '+sh([aE,c])],bytes:aE*c,prec:'FP8',
+       f:'top-k '+kept+'  +  SW '+sw+'  =  '+aE+' entries\nKV_sparse ∈ '+sh([aE,c])});
+    node('mqa','csa','⑤ MQA Core','128 head chia sẻ K/V',195,
+      {op:'128 head DÙNG CHUNG một tập K/V (Multi-Query Attention). logits = q·Kᵀ/√512; softmax có attention-sink; o = Σ s·V.',
+       in:['q '+sh([n,CFG.n_h,c]),'KV_sparse '+sh([aE,c])],out:['o '+sh([n,CFG.n_h*c])],
+       bytes:n*CFG.n_h*c*2,prec:'BF16',
+       f:'logits ∈ (n_h, '+aE+')\no ∈ ℝ^(n, n_h·c) = '+sh([n,CFG.n_h*c])});
+    node('gop','proj','⑥ Grouped Out Proj','g = 16 nhóm',190,
+      {op:'Chia 65536 chiều output thành 16 nhóm, mỗi nhóm proj (4096, 1024); concat (16384) rồi W_O (16384, 7168) → trở về d.',
+       in:['o '+sh([n,CFG.n_h*c])],out:['out_attn '+sh([n,d])],bytes:n*d*2,
+       params:CFG.g*((CFG.n_h*c/CFG.g)*CFG.d_g)+(CFG.g*CFG.d_g)*d,prec:'BF16',
+       f:'out_attn = concat(16 nhóm) · W_O ∈ '+sh([n,d])});
+    edge('preA','kv',sh([n,d]));
+    edge('preA','qp',sh([n,d]));
+    edge('kv','idx',sh([comp,c]));
+    edge('kv','topk',sh([comp,c]));
+    edge('idx','topk',sh([n,comp]));
+    edge('qp','mqa',sh([n,CFG.n_h,c]));
+    edge('topk','mqa',sh([aE,c]));
+    edge('mqa','gop',sh([n,CFG.n_h*c]));
+  } else {
+    const comp=Math.ceil(ctx/CFG.hca.mp), sw=Math.min(CFG.n_win,ctx), aE=comp+sw;
+    node('kv','hca','① KV-Compress','2×(d,c) · m\' = 128',195,
+      {op:'Chỉ 1 nhánh (không overlapped, không indexer). C = H·W_KV, Z = H·W_Z; S = softmax(Z+B); nén mỗi 128 token KV thành 1 entry.',
+       in:['input_a '+sh([n,d])],out:['C^Comp '+sh([comp,c])+' FP8'],bytes:comp*c,params:2*d*c,prec:'FP8',
+       f:'C^Comp ∈ ℝ^(⌈ctx/m\'⌉, c) = '+sh([comp,c])+'\nctx = '+ctx+' → chỉ '+comp+' entry (KV cache cực nhỏ)'});
+    node('qp','proj','② Query Proj','W_DQ · W_UQ',185,
+      {op:'Down-proj W_DQ (7168, 1536) rồi up-proj W_UQ (1536, 65536); reshape (128, 512); RoPE 64 dim cuối.',
+       in:['input_a '+sh([n,d])],out:['q '+sh([n,CFG.n_h,c])],bytes:n*CFG.n_h*c*2,
+       params:d*CFG.d_c+CFG.d_c*(c*CFG.n_h),prec:'BF16',
+       f:'q ∈ ℝ^(n, n_h, c) = '+sh([n,CFG.n_h,c])});
+    node('mqa','hca','③ MQA Core','128 head chia sẻ K/V',195,
+      {op:'K = V = C^Comp ('+comp+' entry) + '+sw+' sliding-window = '+aE+' entry, dùng chung cho 128 head. Có attention-sink. KHÔNG có sparse selection.',
+       in:['q '+sh([n,CFG.n_h,c]),'C^Comp + SW '+sh([aE,c])],out:['o '+sh([n,CFG.n_h*c])],
+       bytes:n*CFG.n_h*c*2,prec:'BF16',
+       f:'KV: '+comp+' nén + '+sw+' SW = '+aE+' entries\no ∈ '+sh([n,CFG.n_h*c])});
+    node('gop','proj','④ Grouped Out Proj','g = 16 nhóm',190,
+      {op:'16 nhóm proj (4096, 1024) → concat (16384) → W_O → về d.',
+       in:['o '+sh([n,CFG.n_h*c])],out:['out_attn '+sh([n,d])],bytes:n*d*2,
+       params:CFG.g*((CFG.n_h*c/CFG.g)*CFG.d_g)+(CFG.g*CFG.d_g)*d,prec:'BF16',
+       f:'out_attn ∈ '+sh([n,d])});
+    edge('preA','kv',sh([n,d]));
+    edge('preA','qp',sh([n,d]));
+    edge('kv','mqa',sh([comp,c]));
+    edge('qp','mqa',sh([n,CFG.n_h,c]));
+    edge('mqa','gop',sh([n,CFG.n_h*c]));
+  }
+
+  node('mixA','mhc','Residual Mix (attn)','X ← B·X + C·out_attn',200,
+    {op:'Trộn output attention trở lại 4 nhánh residual. Kích thước state giữ nguyên.',
+     in:['X_l '+sh([n,4,d]),'out_attn '+sh([n,d])],out:["X' "+sh([n,4,d])],bytes:n*4*d*2,prec:'BF16',
+     f:"X' ← B_attn · X_l + C_attn · out_attn ∈ "+sh([n,4,d])});
+  edge('gop','mixA',sh([n,d]));
+  edge('Xin','mixA',sh([n,4,d]));          // skip residual
+
+  node('preM','mhc','Post-Block mHC','RMSNorm + gating',195,
+    {op:'Sinh gating mới, gộp residual thành đầu vào cho sublayer MoE.',
+     in:["X' "+sh([n,4,d])],out:['input_m '+sh([n,d])],bytes:n*d*2,params:393e3,prec:'BF16',
+     f:'input_m = A_l · X_l ∈ '+sh([n,d])});
+  edge('mixA','preM',sh([n,4,d]));
+
+  const dff=CFG.moe.d_ff,nr=CFG.moe.routed,k=CFG.moe.topk,expP=d*dff*3;
+  const slots=n*k, distinct=Math.round(nr*(1-Math.pow(1-1/nr,slots)));
+  const hash=isHash(selLayer);
+  node('rtr','sel',hash?'① Router (Hash)':'① Router (top-6)',hash?'hash(token_ID)':'√Softplus → top-6',195,
+    {op:hash
+        ? '<b>Hash routing</b> (3 layer MoE đầu). Bỏ qua affinity, chọn cứng 6 expert theo <code>hash(token_ID) mod (N_r/6)</code>, trọng số đều g<sub>i</sub> = 1/6. Lý do: embedding các layer đầu chưa đủ giàu thông tin để router học phân biệt expert.'
+        : 'Chọn <b>6 / 384</b> expert qua 5 bước (cơ chế <b>aux-loss-free</b>, kế thừa V3):<br>'
+          +'① <b>Affinity thô:</b> z = input_m · W_router (7168, 384), z<sub>i</sub> = h·e<sub>i</sub> — điểm tương hợp token↔expert i.<br>'
+          +'② <b>Hàm affinity:</b> s<sub>i</sub> = √Softplus(z<sub>i</sub>) ≥ 0. V4 thay Sigmoid của V3: không chặn trên, tăng ~√z nên phân biệt expert điểm cao sắc nét hơn, gradient không triệt tiêu.<br>'
+          +'③ <b>Chọn top-6:</b> theo s<sub>i</sub> + b<sub>i</sub>. Bias b<sub>i</sub> CHỈ dùng để chọn (không vào trọng số), cập nhật ngoài gradient để cân bằng tải — expert quá tải giảm b, thiếu tải tăng b.<br>'
+          +'④ <b>Trọng số gating:</b> g<sub>i</sub> chuẩn hoá s<sub>i</sub> trên đúng 6 expert đã chọn, KHÔNG gồm b<sub>i</sub>.<br>'
+          +'⑤ <b>Kết hợp:</b> cộng shared expert với tổng có trọng số 6 routed expert.',
+     in:['input_m '+sh([n,d])],out:['top-6 idx '+sh([n,k]),'weights '+sh([n,k])],
+     bytes:n*nr*2,params:d*nr,prec:'BF16',
+     f:hash
+        ? '𝒮 = { hash(token_ID) mod (N_r/6) }      |𝒮| = 6 / 384\n'
+          +'g_i = 1/6  (đều)\n'
+          +'y   = E_shared(h) + Σ_{i∈𝒮} g_i · E_i(h)'
+        : '① z_i = input_m · e_i                 z ∈ ℝ^384\n'
+          +'② s_i = √( ln(1 + e^{z_i} ) )         s_i ≥ 0     (√Softplus)\n'
+          +'③ 𝒮  = Top-6_i ( s_i + b_i )          |𝒮| = 6 / 384\n'
+          +'④ g_i = s_i / Σ_{j∈𝒮} s_j   (i∈𝒮) ,  g_i = 0 (i∉𝒮)\n'
+          +'⑤ y  = E_shared(h) + Σ_{i∈𝒮} g_i · E_i(h)\n'
+          +'   bias:  b_i ← b_i + γ ( c̄ − c_i )     [cân bằng tải, ngoài gradient]'});
+  node('esh','moe','② Shared Expert','SwiGLU · luôn chạy',190,
+    {op:'1 expert dùng chung cho MỌI token: y = (SiLU(x·W_gate) ⊙ (x·W_up)) · W_down, trung gian d_ff = 3072. SwiGLU clamp [-10, 10].',
+     in:['input_m '+sh([n,d])],out:['e_shared '+sh([n,d])],bytes:n*d*2,params:expP,prec:'BF16',
+     f:'x(7168) → d_ff(3072) → d(7168)\nparams/expert = 3·d·d_ff = '+P(expP)});
+  node('ert','moe','③ Routed Experts','top-6 / 384 · SwiGLU',200,
+    {op:'Mỗi token đi qua 6 routed expert (chọn trong 384). '+(n>1
+        ? 'Cả chunk '+n+' token tạo '+slots+' expert-activation; ~'+distinct+'/'+nr+' expert khác nhau được chạm (routing cân bằng). Weight FP4 ≈ 33 MB/expert.'
+        : 'Decode 1 token → đúng 6 routed expert được kích hoạt.'),
+     in:['input_m '+sh([n,d]),'top-6 idx '+sh([n,k])],out:['e_routed[6] '+sh([n,d])],
+     bytes:n*d*2,params:expP*k,prec:'FP4',
+     f:'6 expert × (7168 → 3072 → 7168)\n'+slots+' activation, ~'+distinct+' expert khác nhau'});
+  node('cmb','moe','④ Combine','y = e_s + Σ wᵢ·eᵢ',185,
+    {op:'Cộng có trọng số: output shared expert + tổng 6 routed expert nhân gating weight.',
+     in:['e_shared '+sh([n,d]),'e_routed[6] '+sh([n,d]),'weights '+sh([n,k])],
+     out:['out_moe '+sh([n,d])],bytes:n*d*2,prec:'BF16',
+     f:'out_moe = e_shared + Σ_{i=1..6} w_i · e_{r_i} ∈ '+sh([n,d])});
+  edge('preM','rtr',sh([n,d]));
+  edge('preM','esh',sh([n,d]));
+  edge('rtr','ert',sh([n,k]));
+  edge('rtr','cmb',sh([n,k]));
+  edge('ert','cmb',sh([n,d]));
+  edge('esh','cmb',sh([n,d]));
+
+  node('mixM','mhc','Residual Mix (MoE)','X ← B·X + C·out_moe',200,
+    {op:'Trộn output MoE vào residual → state ra của block l.',
+     in:["X' "+sh([n,4,d]),'out_moe '+sh([n,d])],out:['X_{l+1} '+sh([n,4,d])],bytes:n*4*d*2,prec:'BF16',
+     f:'X_{l+1} ← B_moe · X\' + C_moe · out_moe ∈ '+sh([n,4,d])});
+  node('Xout','state','X_{l+1}','→ block kế / head',160,
+    {op:'State ra. Nếu l < 61 → quay lại làm X_l của block kế tiếp (đường đứt nét ×61). Nếu l = 61 → đi tiếp vào Final RMSNorm.',
+     in:['X_{l+1} '+sh([n,4,d])],out:['X_{l+1} '+sh([n,4,d])],bytes:n*4*d*2,prec:'BF16',
+     f:'X_{l+1} ∈ '+sh([n,4,d])+'\nlặp l = 1 … 61'});
+  edge('cmb','mixM',sh([n,d]));
+  edge('mixA','mixM',sh([n,4,d]));         // skip residual
+  edge('mixM','Xout',sh([n,4,d]));
+  edge('Xout','Xin','×61 lặp',true);       // BACK EDGE — loại khỏi DAG khi gán level
+
+  /* ---- output head ---- */
+  node('norm','out','Final RMSNorm','sau block 61',180,
+    {op:'Thu gọn residual h_final = A_final · X_L rồi chuẩn hoá RMSNorm.',
+     in:['X_61 '+sh([n,4,d])],out:['h_final '+sh([n,d])],bytes:n*d*2,params:d,prec:'BF16',
+     f:'h_final ∈ ℝ^(n, d) = '+sh([n,d])});
+  node('lm','out','LM Head','W_lm (7168, 128000)',200,
+    {op:'Chiếu lên vocab để ra logits cho mỗi token.',
+     in:['h_final '+sh([n,d])],out:['logits '+sh([n,CFG.V])],bytes:n*CFG.V*2,params:d*CFG.V,prec:'BF16',
+     f:'logits = h_final · W_lm ∈ '+sh([n,CFG.V])+'\n= '+Bytes(n*CFG.V*2)+' BF16'});
+  node('samp','out','Softmax + Sample','chỉ token cuối',185,
+    {op:(S.mode==='prefill'
+      ? 'Prefill: chỉ hàng logits của TOKEN CUỐI chunk được dùng để sinh token kế tiếp; '+(n-1)+' hàng còn lại bỏ đi khi inference.'
+      : 'Decode: chỉ có 1 hàng logits → softmax → sample ra token kế tiếp.'),
+     in:['logits '+sh([n,CFG.V])],out:['token_id kế tiếp (1,)'],bytes:CFG.V*2,prec:'BF16',
+     f:'p = softmax(logits[-1]) ∈ ℝ^128000\nnext_token = sample(p)'});
+  node('outt','io','Token ra','→ detokenize',140,
+    {op:'token_id → subword → ghép vào chuỗi trả về user, rồi quay lại vòng decode cho token kế tiếp.',
+     in:['token_id (1,)'],out:['text'],bytes:2,prec:'INT32',f:'next_token → text'});
+  edge('Xout','norm',sh([n,4,d]));
+  edge('norm','lm',sh([n,d]));
+  edge('lm','samp',sh([n,CFG.V]));
+  edge('samp','outt','(1,)');
+
+  return {N,E};
+}
+
+/* ================= LAYERED LAYOUT: BFS gán level → đặt khối trên xuống ================= */
+/* Mọi hằng đều là bội của lưới 10 ⇒ cổng khối luôn nằm trên lưới ⇒ không sinh đoạn chéo. */
+const TOPY=40, PITCH=100, CENTER=560, HGAP=40, CANVW=1060;
+
+function build(){
+  const {N,E}=graph();
+  const map={}; N.forEach(b=>map[b.id]=b);
+  const fwd=E.filter(e=>!e.back);
+
+  /* --- (1) BFS gán level (Kahn + relaxation ⇒ longest-path: MỌI cạnh hướng xuống) --- */
+  const adj={}, indeg={}, lvl={};
+  N.forEach(b=>{adj[b.id]=[];indeg[b.id]=0;lvl[b.id]=0;});
+  fwd.forEach(e=>{adj[e.u].push(e.v);indeg[e.v]++;});
+  const Q=N.filter(b=>indeg[b.id]===0).map(b=>b.id);   // nguồn: 'msg'
+  while(Q.length){
+    const u=Q.shift();                                  // BFS: hàng đợi FIFO
+    for(const v of adj[u]){
+      if(lvl[v]<lvl[u]+1) lvl[v]=lvl[u]+1;              // relax ⇒ level = đường dài nhất
+      if(--indeg[v]===0) Q.push(v);
+    }
+  }
+  const maxL=Math.max(...N.map(b=>lvl[b.id]));
+
+  /* --- (2) gom theo level; sắp thứ tự trong level theo barycenter của tiền bối --- */
+  const rows=[]; for(let i=0;i<=maxL;i++) rows.push([]);
+  N.forEach(b=>rows[lvl[b.id]].push(b));
+  const preds={}; N.forEach(b=>preds[b.id]=[]);
+  fwd.forEach(e=>preds[e.v].push(e.u));
+
+  rows.forEach((row,L)=>{
+    if(L>0) row.sort((a,b)=>bary(a)-bary(b));
+    // đặt x: căn giữa quanh CENTER
+    const tot=row.reduce((s,b)=>s+b.w,0)+HGAP*(row.length-1);
+    let x=CENTER-tot/2;
+    row.forEach(b=>{b.x=Math.round(x/10)*10; b.y=TOPY+L*PITCH; x=b.x+b.w+HGAP;});  // x,y ⋮10
+    function bary(b){
+      const ps=preds[b.id].map(id=>map[id]).filter(p=>p.x!==undefined);
+      if(!ps.length) return CENTER;
+      return ps.reduce((s,p)=>s+p.x+p.w/2,0)/ps.length;
+    }
+  });
+
+  /* --- (3) cấp phát cổng: span-1 dùng S→N; cạnh vượt level dùng cổng bên (E/W) --- */
+  const uIn={},uOut={}; N.forEach(b=>{uIn[b.id]=new Set();uOut[b.id]=new Set();});
+  const cx=b=>map[b].x+map[b].w/2;
+  function pick(id,kind,prefs,excl){
+    const oi=uIn[id],oo=uOut[id];
+    for(const p of prefs){
+      if(kind==='out'){ if(oi.has(p))continue; if(excl&&oo.has(p))continue; oo.add(p); return p; }
+      if(oo.has(p)||oi.has(p))continue; oi.add(p); return p;
+    }
+    return prefs[0];
+  }
+  const W=[];
+  const back=E.filter(e=>e.back), s1=[], sN=[];
+  fwd.forEach(e=>{e.span=lvl[e.v]-lvl[e.u]; (e.span===1?s1:sN).push(e);});
+  // back edge trước — giữ cổng W ở hai đầu (kênh trái)
+  back.forEach(e=>{
+    const sp=pick(e.u,'out',['W','E','S'],true), dp=pick(e.v,'in',['W','E','S'],true);
+    W.push({from:e.u+':'+sp,to:e.v+':'+dp,label:e.label,step:lvl[e.u]+1,dash:true});
+  });
+  /* phía kênh đi của một cạnh: nguồn nằm bên phải đích ⇒ kênh phải (E), ngược lại kênh trái (W).
+     Cổng RA và cổng VÀO phải cùng một phía, nếu không đường sẽ phải vòng ngược quanh khối. */
+  const sideOf=e=> cx(e.u)>=cx(e.v) ? 'E' : 'W';
+  const opp=s=> s==='E'?'W':'E';
+
+  // span-1: nguồn dùng S (fanout được), đích ưu tiên N; đích nào gần theo x thì giành N trước
+  s1.sort((a,b)=>Math.abs(cx(a.u)-cx(a.v))-Math.abs(cx(b.u)-cx(b.v)));
+  s1.forEach(e=>{
+    const s=sideOf(e);
+    const sp=pick(e.u,'out',['S',s,opp(s)],false);
+    const dp=pick(e.v,'in',['N',s,opp(s)],true);
+    W.push({from:e.u+':'+sp,to:e.v+':'+dp,label:e.label,step:lvl[e.u]+1});
+  });
+  // cạnh vượt level: cấp cổng cho cạnh DÀI trước (span giảm dần) — cạnh dài cần kênh bên thông suốt,
+  // nếu để cạnh ngắn giành trước thì cạnh dài phải vòng chéo qua cả sơ đồ.
+  sN.sort((a,b)=>b.span-a.span);
+  sN.forEach(e=>{
+    const s=sideOf(e);
+    const sp=pick(e.u,'out',['S',s,opp(s)],true);
+    const inPref = (sp==='S') ? [s,opp(s),'N'] : [sp,opp(sp),'N'];   // vào cùng phía với kênh ra
+    const dp=pick(e.v,'in',inPref,true);
+    W.push({from:e.u+':'+sp,to:e.v+':'+dp,label:e.label,step:lvl[e.u]+1});
+  });
+
+  /* --- (4) khung nhóm + nhãn level --- */
+  const y0=map['Xin'].y-22, y1=map['Xout'].y+map['Xout'].h+22;
+  const GRP=[{x:150,y:y0,w:CANVW-260,h:y1-y0,
+    label:'TRANSFORMER BLOCK  l = '+selLayer+'  ('+layerType(selLayer).toUpperCase()+' + DeepSeekMoE)  —  lặp ×61'}];
+  const LVL=[]; for(let L=0;L<=maxL;L++) LVL.push({y:TOPY+L*PITCH+32,text:'L'+L});
+
+  return {width:CANVW,height:TOPY+(maxL+1)*PITCH+20,blocks:N,wires:W,groups:GRP,levels:LVL,maxL};
+}
+
+/* ================= ORTHOGONAL A* ROUTER (chuẩn hw-diagram) ================= */
+const NS="http://www.w3.org/2000/svg";
+let DIAGRAM,blkMap,GW,GH,grid,wireHeat;
+/* COST_WIRE cao + đánh dấu vùng đệm quanh đường đã đi ⇒ các đường KHÔNG chạy trùng lane.
+   Đi đè lên 1 đường cũ: +3·COST_WIRE ; chạy sát (1 ô = 10px): +1·COST_WIRE. */
+/* GRID=10. MỌI cổng phải nằm đúng trên lưới, nếu không đoạn nối stub→A* sẽ lệch cả x lẫn y ⇒ đường chéo.
+   Bảo đảm: y khối ⋮10, h=60 (h/2=30 ⋮10), w ⋮20 (w/2 ⋮10), x ⋮10, STUB=20 ⋮10. */
+const GRID=10,STUB=20,COST_WALL=1e9,COST_MARGIN=8,COST_WIRE=6,COST_BEND=30,MAX_ITER=40000;
+const HEAT_CORE=3, HEAT_NEAR=1;
+function port(spec){const [id,side]=spec.split(":");const b=blkMap[id];
+  switch(side){case"E":return{x:b.x+b.w,y:b.y+b.h/2,dir:[1,0]};case"W":return{x:b.x,y:b.y+b.h/2,dir:[-1,0]};
+    case"N":return{x:b.x+b.w/2,y:b.y,dir:[0,-1]};case"S":return{x:b.x+b.w/2,y:b.y+b.h,dir:[0,1]};}}
+function initGrid(){GW=Math.ceil(DIAGRAM.width/GRID)+2;GH=Math.ceil(DIAGRAM.height/GRID)+2;
+  grid=new Uint8Array(GW*GH);wireHeat=new Uint8Array(GW*GH);
+  DIAGRAM.blocks.forEach(b=>{const x0=Math.floor(b.x/GRID),y0=Math.floor(b.y/GRID),
+    x1=Math.ceil((b.x+b.w)/GRID),y1=Math.ceil((b.y+b.h)/GRID);
+    for(let gy=y0;gy<=y1;gy++)for(let gx=x0;gx<=x1;gx++)setG(gx,gy,2);
+    for(let gy=y0-1;gy<=y1+1;gy++)for(let gx=x0-1;gx<=x1+1;gx++)if(getG(gx,gy)<2)setG(gx,gy,1);});}
+function getG(gx,gy){return(gx<0||gy<0||gx>=GW||gy>=GH)?2:grid[gy*GW+gx];}
+function setG(gx,gy,v){if(gx>=0&&gy>=0&&gx<GW&&gy<GH)grid[gy*GW+gx]=Math.max(grid[gy*GW+gx],v);}
+function addHeat(gx,gy,v){if(gx>=0&&gy>=0&&gx<GW&&gy<GH)wireHeat[gy*GW+gx]=Math.min(200,wireHeat[gy*GW+gx]+v);}
+function heatG(gx,gy){addHeat(gx,gy,HEAT_CORE);
+  addHeat(gx+1,gy,HEAT_NEAR);addHeat(gx-1,gy,HEAT_NEAR);
+  addHeat(gx,gy+1,HEAT_NEAR);addHeat(gx,gy-1,HEAT_NEAR);}
+function getHeat(gx,gy){return(gx<0||gy<0||gx>=GW||gy>=GH)?0:wireHeat[gy*GW+gx];}
+function cellCost(gx,gy){const g=getG(gx,gy);if(g===2)return COST_WALL;return(g===1?COST_MARGIN:1)+getHeat(gx,gy)*COST_WIRE;}
+function snap(px){return Math.round(px/GRID);}
+function astar(sx,sy,ex,ey,sd){const key=(gx,gy,dd)=>gx+GW*gy+(dd<<20);
+  const g=new Map(),from=new Map(),open=[];
+  function push(gx,gy,dd,gv,fv,pk){const kk=key(gx,gy,dd);if(g.has(kk)&&g.get(kk)<=gv)return;
+    g.set(kk,gv);from.set(kk,pk);let lo=0,hi=open.length;
+    while(lo<hi){const mid=(lo+hi)>>1;open[mid][0]<fv?lo=mid+1:hi=mid;}open.splice(lo,0,[fv,gx,gy,dd,kk]);}
+  /* heuristic PHẢI admissible: chi phí ô tự do = 1 ⇒ h = manhattan (KHÔNG nhân GRID).
+     Nhân GRID sẽ ước lượng thừa 10×, A* hoá tham lam và sinh đường bậc thang nhiều đoạn. */
+  const h=(gx,gy)=>(Math.abs(gx-ex)+Math.abs(gy-ey));push(sx,sy,sd,0,h(sx,sy),null);
+  let it=0;
+  while(open.length&&it++<MAX_ITER){const [,cx,cy,cd,ck]=open.shift();
+    if(cx===ex&&cy===ey){const pts=[[ex*GRID,ey*GRID]];let ckk=ck;
+      while(from.get(ckk)!==null){ckk=from.get(ckk);const d2=ckk>>20,idx=ckk-(d2<<20);
+        pts.push([(idx%GW)*GRID,Math.floor(idx/GW)*GRID]);}pts.reverse();return pts;}
+    for(const [dx,dy,nd] of [[1,0,0],[-1,0,0],[0,1,1],[0,-1,1]]){const nx=cx+dx,ny=cy+dy;
+      const cc=cellCost(nx,ny);if(cc>=COST_WALL)continue;
+      const ng=g.get(ck)+cc+((cd!==2&&nd!==cd)?COST_BEND:0);push(nx,ny,nd,ng,ng+h(nx,ny),ck);}}
+  return null;}
+function routeLZ(p1,p2){const h1=p1.dir[0]!==0,h2=p2.dir[0]!==0,pts=[[p1.x,p1.y]];
+  if(h1!==h2){if(h1)pts.push([p2.x,p1.y]);else pts.push([p1.x,p2.y]);}
+  else if(h1){const mx=(p1.x+p2.x)/2;pts.push([mx,p1.y],[mx,p2.y]);}
+  else{const my=(p1.y+p2.y)/2;pts.push([p1.x,my],[p2.x,my]);}
+  pts.push([p2.x,p2.y]);return simplify(pts);}
+function route(p1,p2){const sx=p1.x+p1.dir[0]*STUB,sy=p1.y+p1.dir[1]*STUB,
+  ex=p2.x+p2.dir[0]*STUB,ey=p2.y+p2.dir[1]*STUB;
+  const inner=astar(snap(sx),snap(sy),snap(ex),snap(ey),p1.dir[0]!==0?0:1);let pts;
+  if(inner){inner.forEach(([a,b])=>heatG(snap(a),snap(b)));pts=[[p1.x,p1.y],[sx,sy],...inner,[ex,ey],[p2.x,p2.y]];}
+  else pts=routeLZ(p1,p2);return simplify(pts);}
+function simplify(pts){const u=[];for(const p of pts)if(!u.length||p[0]!==u[u.length-1][0]||p[1]!==u[u.length-1][1])u.push(p);
+  if(u.length<3)return u;const r=[u[0]];
+  for(let i=1;i<u.length-1;i++){const a=r[r.length-1],b=u[i],cc=u[i+1];
+    const col=(a[0]===b[0]&&b[0]===cc[0])||(a[1]===b[1]&&b[1]===cc[1]);if(!col)r.push(b);}
+  r.push(u[u.length-1]);return r;}
+function midSeg(pts){let best=0,bi=0;
+  for(let i=0;i<pts.length-1;i++){const dd=Math.abs(pts[i][0]-pts[i+1][0])+Math.abs(pts[i][1]-pts[i+1][1]);if(dd>best){best=dd;bi=i;}}
+  return[(pts[bi][0]+pts[bi+1][0])/2,(pts[bi][1]+pts[bi+1][1])/2];}
+/* CHỈ đường thẳng + góc vuông: path chỉ gồm lệnh M/L, KHÔNG có lệnh cung (A).
+   Bỏ jump-arc tại điểm cắt — điểm cắt để cắt thẳng, phân biệt bằng màu đường. */
+function buildPaths(allPts){
+  return allPts.map(pts=>pts.map((p,i)=>(i?"L":"M")+p[0]+" "+p[1]).join(" "));
+}
+
+/* ================= RENDER ================= */
+const svg=document.getElementById('svg');
+let PATHS=[];   // {el, step}
+function render(){
+  DIAGRAM=build();blkMap={};DIAGRAM.blocks.forEach(b=>blkMap[b.id]=b);
+  svg.setAttribute('viewBox',`0 0 ${DIAGRAM.width} ${DIAGRAM.height}`);
+  svg.innerHTML='';
+  const defs=document.createElementNS(NS,'defs');
+  defs.innerHTML=Object.keys(HEX).map(k=>
+    `<marker id="arr_${k}" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" refX="6.5" refY="3" orient="auto">
+       <path d="M0,0 L6,3 L0,6 Z" fill="${HEX[k]}"/></marker>`).join('');
+  svg.appendChild(defs);
+
+  (DIAGRAM.levels||[]).forEach(L=>{           // cột nhãn level (độ sâu BFS)
+    const t=document.createElementNS(NS,'text');
+    t.setAttribute('x',24);t.setAttribute('y',L.y);t.setAttribute('text-anchor','middle');
+    t.setAttribute('class','lvl-t');t.textContent=L.text;svg.appendChild(t);});
+
+  (DIAGRAM.groups||[]).forEach(g=>{
+    const r=document.createElementNS(NS,'rect');
+    r.setAttribute('x',g.x);r.setAttribute('y',g.y);r.setAttribute('width',g.w);r.setAttribute('height',g.h);
+    r.setAttribute('rx',10);r.setAttribute('class','grp');svg.appendChild(r);
+    const t=document.createElementNS(NS,'text');
+    t.setAttribute('x',g.x+12);t.setAttribute('y',g.y+18);t.setAttribute('class','grp-t');
+    t.textContent=g.label;svg.appendChild(t);});
+
+  initGrid();
+  const allPts=DIAGRAM.wires.map(w=>route(port(w.from),port(w.to)));
+  const ds=buildPaths(allPts);
+  PATHS=[];
+  DIAGRAM.wires.forEach((w,wi)=>{
+    const cat=blkMap[w.from.split(':')[0]].cat, col=HEX[cat];
+    const p=document.createElementNS(NS,'path');
+    p.setAttribute('d',ds[wi]);p.setAttribute('class','wire');
+    p.style.stroke=col;p.setAttribute('stroke-width',w.dash?1.6:1.9);
+    if(w.dash)p.setAttribute('stroke-dasharray','7 5');
+    p.setAttribute('marker-end',`url(#arr_${cat})`);svg.appendChild(p);
+    PATHS.push({el:p,step:w.step,col});
+    if(showWL&&w.label){const m=midSeg(allPts[wi]),tw=w.label.length*5.7+7;
+      const bg=document.createElementNS(NS,'rect');
+      bg.setAttribute('x',m[0]-tw/2);bg.setAttribute('y',m[1]-8);bg.setAttribute('width',tw);
+      bg.setAttribute('height',14);bg.setAttribute('rx',3);bg.setAttribute('class','wlbl-bg');svg.appendChild(bg);
+      const tx=document.createElementNS(NS,'text');
+      tx.setAttribute('x',m[0]);tx.setAttribute('y',m[1]+3.5);tx.setAttribute('text-anchor','middle');
+      tx.setAttribute('class','wlbl');tx.style.fill=col;tx.textContent=w.label;svg.appendChild(tx);}
+  });
+
+  DIAGRAM.blocks.forEach(b=>{
+    const g=document.createElementNS(NS,'g');g.style.cursor='pointer';
+    const r=document.createElementNS(NS,'rect');
+    r.setAttribute('x',b.x);r.setAttribute('y',b.y);r.setAttribute('width',b.w);r.setAttribute('height',b.h);
+    r.setAttribute('rx',7);r.setAttribute('class','blk'+(selBlk===b.id?' sel':''));
+    r.style.fill=HEX[b.cat]+'22';r.style.stroke=HEX[b.cat];g.appendChild(r);
+    const t=document.createElementNS(NS,'text');
+    t.setAttribute('x',b.x+b.w/2);t.setAttribute('y',b.y+24);t.setAttribute('text-anchor','middle');
+    t.setAttribute('class','blk-t');t.textContent=b.title;g.appendChild(t);
+    const s=document.createElementNS(NS,'text');
+    s.setAttribute('x',b.x+b.w/2);s.setAttribute('y',b.y+42);s.setAttribute('text-anchor','middle');
+    s.setAttribute('class','blk-s');s.textContent=b.spec;g.appendChild(s);
+    g.onclick=()=>{selBlk=b.id;render();showDetail(b);};
+    svg.appendChild(g);});
+
+  document.getElementById('layerInfo').textContent=
+    'Block '+selLayer+' — '+layerType(selLayer).toUpperCase()+(isHash(selLayer)?' · MoE hash routing':' · MoE affinity');
+}
+function showDetail(b){
+  const d=b.det,col=HEX[b.cat];
+  const fmt=x=>{const i=x.indexOf(' ');const nm=i<0?x:x.slice(0,i),rest=i<0?'':x.slice(i+1);
+    return `<div class="io"><b>${nm}</b> <span class="sh">${rest}</span></div>`;};
+  document.getElementById('panel').innerHTML=`
+    <span class="tag" style="background:${col}">${b.cat.toUpperCase()}</span>
+    <h3>${b.title}</h3>
+    <div class="lab">Phép toán</div><div style="font-size:13px;color:#c9d4e0">${d.op}</div>
+    <div class="formula">${d.f}</div>
+    <div class="lab">Đầu vào</div>${d.in.length?d.in.map(fmt).join(''):'<div class="hint">— (điểm bắt đầu dataflow)</div>'}
+    <div class="lab">Đầu ra</div>${d.out.length?d.out.map(fmt).join(''):'<div class="hint">—</div>'}
+    <div class="kv">activation: <b>${Bytes(d.bytes)}</b>${d.params?`  ·  weight: <b>${P(d.params)}</b>`:''}  ·  precision: <b style="color:${col}">${d.prec}</b></div>`;
+}
+
+/* ================= ANIMATION dòng dữ liệu ================= */
+let playing=false;
+function play(){
+  if(playing)return; playing=true;
+  const btn=document.getElementById('playBtn'); btn.textContent='… đang chạy';
+  const maxStep=Math.max(...PATHS.map(p=>p.step));
+  let s=1;
+  const runStep=()=>{
+    if(s>maxStep){playing=false;btn.textContent='▶ Chạy dòng dữ liệu';return;}
+    const ws=PATHS.filter(p=>p.step===s);
+    if(!ws.length){s++;runStep();return;}
+    const dots=ws.map(w=>{const cc=document.createElementNS(NS,'circle');
+      cc.setAttribute('r',5);cc.setAttribute('fill',w.col);
+      cc.setAttribute('stroke','#0d1117');cc.setAttribute('stroke-width',1.5);
+      svg.appendChild(cc);return cc;});
+    const t0=performance.now(),dur=520;
+    const tick=t=>{const u=Math.min(1,(t-t0)/dur);
+      ws.forEach((w,i)=>{const L=w.el.getTotalLength();const pt=w.el.getPointAtLength(L*u);
+        dots[i].setAttribute('cx',pt.x);dots[i].setAttribute('cy',pt.y);
+        w.el.setAttribute('stroke-width',3);});
+      if(u<1)requestAnimationFrame(tick);
+      else{dots.forEach(dd=>dd.remove());ws.forEach(w=>w.el.setAttribute('stroke-width',1.9));
+        s++;setTimeout(runStep,70);}};
+    requestAnimationFrame(tick);
+  };
+  runStep();
+}
+
+/* ================= LAYERS + CONTROLS ================= */
+function renderLayers(){
+  const el=document.getElementById('layers');el.innerHTML='';
+  for(let l=1;l<=CFG.L;l++){const t=layerType(l);const dv=document.createElement('div');
+    dv.className='lyr '+t+(l===selLayer?' sel':'');dv.textContent=l;
+    dv.title='Layer '+l+' — '+t.toUpperCase()+(isHash(l)?' · MoE hash':'');
+    if(isHash(l)){const h=document.createElement('span');h.className='h';dv.appendChild(h);}
+    dv.onclick=()=>{selLayer=l;selBlk=null;renderLayers();render();
+      document.getElementById('panel').innerHTML='<p class="hint">← Bấm vào một khối để xem chi tiết.</p>';};
+    el.appendChild(dv);}
+}
+function refreshAll(){renderTokPanel();render();}
+document.getElementById('scenT').onclick=e=>{const b=e.target.closest('button');if(!b)return;
+  cur=b.dataset.s;[...e.currentTarget.children].forEach(x=>x.classList.toggle('on',x===b));
+  selBlk=null;refreshAll();
+  document.getElementById('panel').innerHTML='<p class="hint">← Bấm vào một khối để xem chi tiết.</p>';};
+document.getElementById('msgIn').addEventListener('input',()=>{if(cur!=='msg'){cur='msg';
+  [...document.getElementById('scenT').children].forEach(x=>x.classList.toggle('on',x.dataset.s==='msg'));}
+  refreshAll();});
+document.getElementById('chunkBtn').onclick=()=>{cur='chunk';
+  [...document.getElementById('scenT').children].forEach(x=>x.classList.toggle('on',x.dataset.s==='chunk'));
+  refreshAll();};
+document.getElementById('wlblCk').onchange=e=>{showWL=e.target.checked;render();};
+document.getElementById('playBtn').onclick=play;
+
+renderLayers();refreshAll();
+</script>
+</body>
+</html>

@@ -1,0 +1,212 @@
+{
+  "case": "numbers_seq16_layer2",
+  "prompt": "1 2 3 5 8 13 21 34",
+  "seq_len": 16,
+  "layer_id": 2,
+  "source_shard": "/root/danh/weight/model-00004-of-00046.safetensors",
+  "head_chunk": 16,
+  "softmax_scale": 0.04419417382415922,
+  "compress_ratio": 4,
+  "window_size": 128,
+  "rope_head_dim": 64,
+  "head_dim": 512,
+  "n_local_heads": 64,
+  "max_abs_diff_qcau_py_vs_original": 0.0,
+  "mean_abs_diff_qcau_py_vs_original": 0.0,
+  "notes": "BF16 tensors are exact uint16 hex dumps in row-major order.",
+  "tensors": {
+    "input_ids": {
+      "shape": [
+        1,
+        16
+      ],
+      "dtype": "torch.int32",
+      "order": "row_major_flat",
+      "file": "input_ids.int.txt"
+    },
+    "x_attn": {
+      "shape": [
+        1,
+        16,
+        4096
+      ],
+      "dtype": "torch.bfloat16",
+      "order": "row_major_flat",
+      "file": "x_attn.bf16_hex.txt",
+      "exact_format": "one uint16 bfloat16 hex value per line"
+    },
+    "c_q": {
+      "shape": [
+        1,
+        16,
+        1024
+      ],
+      "dtype": "torch.bfloat16",
+      "order": "row_major_flat",
+      "file": "c_q.bf16_hex.txt",
+      "exact_format": "one uint16 bfloat16 hex value per line"
+    },
+    "q_after_query_up_rope": {
+      "shape": [
+        1,
+        16,
+        64,
+        512
+      ],
+      "dtype": "torch.bfloat16",
+      "order": "row_major_flat",
+      "file": "q_after_query_up_rope.bf16_hex.txt",
+      "exact_format": "one uint16 bfloat16 hex value per line"
+    },
+    "kv_after_rope_quant_compress": {
+      "shape": [
+        1,
+        20,
+        512
+      ],
+      "dtype": "torch.bfloat16",
+      "order": "row_major_flat",
+      "file": "kv_after_rope_quant_compress.bf16_hex.txt",
+      "exact_format": "one uint16 bfloat16 hex value per line"
+    },
+    "topk_idxs": {
+      "shape": [
+        1,
+        16,
+        20
+      ],
+      "dtype": "torch.int32",
+      "order": "row_major_flat",
+      "file": "topk_idxs.int.txt"
+    },
+    "attn_sink": {
+      "shape": [
+        64
+      ],
+      "dtype": "torch.float32",
+      "order": "row_major_flat",
+      "file": "attn_sink.fp32.txt"
+    },
+    "freqs_cis_real": {
+      "shape": [
+        16,
+        32
+      ],
+      "dtype": "torch.float32",
+      "order": "row_major_flat",
+      "file": "freqs_cis_real.fp32.txt"
+    },
+    "freqs_cis_imag": {
+      "shape": [
+        16,
+        32
+      ],
+      "dtype": "torch.float32",
+      "order": "row_major_flat",
+      "file": "freqs_cis_imag.fp32.txt"
+    },
+    "sparse_o_before_inverse_rope": {
+      "shape": [
+        1,
+        16,
+        64,
+        512
+      ],
+      "dtype": "torch.bfloat16",
+      "order": "row_major_flat",
+      "file": "sparse_o_before_inverse_rope.bf16_hex.txt",
+      "exact_format": "one uint16 bfloat16 hex value per line"
+    },
+    "qcau_o_after_inverse_rope": {
+      "shape": [
+        1,
+        16,
+        64,
+        512
+      ],
+      "dtype": "torch.bfloat16",
+      "order": "row_major_flat",
+      "file": "qcau_o_after_inverse_rope.bf16_hex.txt",
+      "exact_format": "one uint16 bfloat16 hex value per line"
+    },
+    "qcau_py_o_after_inverse_rope": {
+      "shape": [
+        1,
+        16,
+        64,
+        512
+      ],
+      "dtype": "torch.bfloat16",
+      "order": "row_major_flat",
+      "file": "qcau_py_o_after_inverse_rope.bf16_hex.txt",
+      "exact_format": "one uint16 bfloat16 hex value per line"
+    },
+    "abs_diff_qcau_py_vs_original": {
+      "shape": [
+        1,
+        16,
+        64,
+        512
+      ],
+      "dtype": "torch.float32",
+      "order": "row_major_flat",
+      "file": "abs_diff_qcau_py_vs_original.fp32.txt"
+    },
+    "linear_x_after_act_quant": {
+      "shape": [
+        1,
+        16,
+        1024
+      ],
+      "dtype": "FP8_E4M3 raw uint8",
+      "order": "row_major_flat",
+      "file": "linear_x_after_act_quant.fp8_e4m3_hex.txt",
+      "source": "linear(): x after x, s = act_quant(c_q, block_size=128, scale_fmt='ue8m0')",
+      "exact_format": "one uint8 FP8_E4M3 hex value per line"
+    },
+    "linear_s_after_act_quant": {
+      "shape": [
+        1,
+        16,
+        8
+      ],
+      "dtype": "FP8_E8M0 raw uint8",
+      "order": "row_major_flat",
+      "file": "linear_s_after_act_quant.e8m0_hex.txt",
+      "float_preview_file": "linear_s_after_act_quant.preview_float.txt",
+      "source": "linear(): s after x, s = act_quant(c_q, block_size=128, scale_fmt='ue8m0')",
+      "encoding": "value = 2 ** (uint8 - 127)",
+      "exact_format": "one uint8 E8M0 hex value per line"
+    }
+  },
+  "w_uq_branch": "callable(w_uq)",
+  "w_uq_dir": "../../w_uq/layer2",
+  "w_uq_weight_file": "../../w_uq/layer2/w_uq.weight.fp8_hex.txt",
+  "w_uq_scale_file": "../../w_uq/layer2/w_uq.scale.e8m0_hex.txt",
+  "w_uq_weight_shape": [
+    32768,
+    1024
+  ],
+  "w_uq_scale_shape": [
+    256,
+    8
+  ],
+  "query_up_linear_act_quant": {
+    "branch": "callable(w_uq)",
+    "input_to_linear": "c_q",
+    "block_size": 128,
+    "scale_fmt": "ue8m0",
+    "linear_x_file": "linear_x_after_act_quant.fp8_e4m3_hex.txt",
+    "linear_s_file": "linear_s_after_act_quant.e8m0_hex.txt",
+    "linear_x_shape": [
+      1,
+      16,
+      1024
+    ],
+    "linear_s_shape": [
+      1,
+      16,
+      8
+    ]
+  }
+}

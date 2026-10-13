@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lưu đồ dataflow 1 layer DeepSeek — xếp theo level</title>
+<style>
+  :root{
+    --compute:#2563eb; --buffer:#16a34a; --memory:#ea580c; --control:#64748b;
+    --wire:#334155; --text:#0f172a;
+  }
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+       margin:0;padding:16px;color:var(--text)}
+  h1{font-size:16px;margin:0 0 2px}
+  .meta{color:#64748b;font-size:12px;margin:0 0 10px}
+  .legend{display:flex;gap:14px;font-size:12px;margin-bottom:8px;flex-wrap:wrap}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:13px;height:13px;border-radius:3px;border:1px solid rgba(0,0,0,.15)}
+  svg{border:1px solid #e2e8f0;border-radius:8px;background:#fff;max-width:100%}
+  .blk{stroke-width:2;fill:#fff}
+  .blk.compute{stroke:var(--compute)} .blk.buffer{stroke:var(--buffer)}
+  .blk.memory{stroke:var(--memory)} .blk.control{stroke:var(--control)}
+  .blk.csa{fill:#fffbeb}
+  .blk-title{font-weight:700;font-size:12px}
+  .blk-spec{font-size:10.3px;fill:#334155}
+  .wire{stroke:var(--wire);fill:none}
+  .wire-lbl{font-size:9.6px;fill:#0f172a;font-style:italic}
+  .wire-lbl-bg{fill:#fff;opacity:.85}
+  .lvl-lbl{font-size:10px;fill:#94a3b8;font-weight:700}
+</style>
+</head>
+<body>
+<h1 id="title">Lưu đồ</h1>
+<p class="meta">Vẽ lại từ deepseek-dataflow.xml (biến thể CSA) · khối xếp theo <b>level topo L0 → L31</b>, luồng dữ liệu trên→dưới · đường nối góc vuông, mũi tên ở đầu nhận, nhãn nghiêng = tensor truyền · ví dụ B=1, n=11 token, d=4096, n_hc=4, n_h=64, c=512, m=4, m′=128</p>
+<div class="legend">
+  <span><i class="sw" style="background:var(--compute)"></i>compute (FU + DSP)</span>
+  <span><i class="sw" style="background:var(--buffer)"></i>buffer (RAB)</span>
+  <span><i class="sw" style="background:var(--memory)"></i>memory (KVB + DDR4)</span>
+  <span><i class="sw" style="background:var(--control)"></i>control / DMA</span>
+  <span><i class="sw" style="background:#fffbeb;border-color:#ca8a04"></i>nền vàng = chỉ CSA (HCA bỏ, KV đọc = 1 entry m′=128 + SW)</span>
+</div>
+<svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+
+<script>
+/* ============================================================
+   DỮ LIỆU — khối khai báo theo (lvl, col); toạ độ sinh tự động
+   trên lưới 20px: x = COLX[col], y = Y0 + lvl*LVLH.
+   ============================================================ */
+const COLX=[30,270,510,750,990];   // 5 cột, khối rộng 200
+const BW=200, Y0=60, LVLH=116, BH=64;
+
+const RAW_BLOCKS=[
+ // [id, lvl, col, type, title, [spec...], csa?, h?]
+ ["X",  0,2,"buffer","X_l — vào layer",["(11,4,4096) BF16 · 360 KB","RAB (URAM)"]],
+ ["P1", 1,2,"compute","① vec + RMSNorm",["(4,4096)→(1,16384) / token","mHCE · 64 DSP"]],
+ ["P2", 2,2,"compute","① Sinh ~A, ~B, ~C",["GEMV x̃·W_φ → (1,4)(4,4)(4,1)","mHCE · W_φ 0,4 MB FP8"]],
+ ["P3", 3,2,"compute","① Sinkhorn–Knopp",["~B→B: 20 vòng trên (4,4)","mHCE · σ(~A)→A, σ(~C)→C · REG"]],
+ ["P4", 4,2,"compute","① Trộn: x̂ = A_l·X_i",["(1,4)·(4,4096) → X̂ (11,4096) FP8","mHCE → RAB"]],
+
+ ["K1", 5,0,"compute","② GEMM C = X̂·W_KV",["(11,4096)·(4096,512) ×2 nhánh","ACU · 512 DSP · 0,09 GOP"]],
+ ["K2", 5,1,"compute","② GEMM Z = X̂·W_Z",["(11,4096)·(4096,512) ×2 nhánh","ACU · 0,09 GOP"]],
+ ["Q1", 5,2,"compute","③ c_Q = RMSNorm(X̂·W_DQ)",["(11,4096)·(4096,1024)→(11,1024)","LIU · 768 DSP · W_DQ 4,2 MB"]],
+ ["K6", 5,3,"compute","④ K^I = X̂·W_KV,idx",["nén m=4 → (3,128) BF16 · ghi KVB","LIU · 2 nhánh a+b"],1],
+ ["I3", 5,4,"compute","④ w_h = a(X̂·W_w)",["(11,4096)·(4096,64) → (11,64)","LIU"],1],
+
+ ["K5", 6,0,"compute","② Sliding Window append",["11 token cuối (11,512) FP8","ACU → KVB"]],
+ ["K3", 6,1,"compute","② Softmax khối m = 4",["S = Softmax_row(Z_bl + B)","ACU · scratch PSA"]],
+ ["Q2", 6,2,"compute","③ GEMM q_raw = c_Q·W_UQ",["(11,1024)·(1024,32768) · 0,74 GOP","QCAU · 3.584 DSP · W 33,6 MB"]],
+ ["I1", 6,3,"compute","④ q_I_raw = c_Q·W_UQ,idx",["(11,1024)·(1024,8192) FP4","LIU · W 4,2 MB"],1],
+
+ ["K4", 7,1,"compute","② Nén C^Comp = Σ S⊙C (a+b)",["m=4 → (3,512) FP8 · m′=128 → (1,512)","ACU → KVB + DDR append"]],
+ ["Q3", 7,2,"compute","③ Reshape + RMSNorm + RoPE",["(11,32768) → q (11,64,512) BF16","QCAU · RoPE 64 dim cuối"]],
+ ["I2", 7,3,"compute","④ Reshape + xoay H(128,128)",["→ q_I′ (11,64,128)","LIU · PSA"],1],
+
+ ["I4", 8,3,"compute","④ raw_score = q_I′·K^{I,T} → ReLU",["(11,64,128)·(128,3) → (11,64,3)","LIU"],1],
+
+ ["KV", 9,0,"memory","KV cache",["C^Comp (3,512) FP8 + SW (11,512)","KVB (URAM) + DDR4 ×4 · 65,3 GB/s","đọc 14 entry (CSA) / 12 (HCA)"],0,78],
+ ["I6", 9,3,"compute","④ score = Σ_h w_h ⊙ raw_score′",["(11,64,3) → (11,3)","LIU"],1],
+
+ ["I7",10,3,"compute","④ Top-k → idx_top",["(11,k) INT32 · bitonic LUT","LIU · PSA"],1],
+ ["I8",11,3,"control","④ gather kv_topk",["descriptor 256b · DDR → KVB","mSGDMA"],1],
+
+ ["A1",12,1,"compute","⑤ RMSNorm + RoPE entry KV",["≤14 entry × (512) · norm-at-write","QCAU"]],
+ ["A2",13,2,"compute","⑤ QK score theo tile",["α·q·K_tileᵀ → (11,64,64) · KV_tile=64","QCAU · lặp tile 'Repeat?'"]],
+ ["A3",14,2,"compute","⑤ Tile max → Running max",["m_run (11,64) FP32","QCAU · PSA"]],
+ ["A4",15,2,"compute","⑤ Accum Denominator (+ sink)",["ℓ (11,64) FP32 · cộng e^{sink−m}","QCAU"]],
+ ["A5",16,2,"compute","⑤ Accumulate V",["acc_V (11,64,512) FP32 · 5,8 MB","QCAU · PSA"]],
+ ["A6",17,2,"compute","⑤ Chia: out = acc_V / ℓ",["→ (11,64,512) BF16 · thoát vòng tile","QCAU"]],
+ ["A7",18,2,"compute","⑤ RoPE⁻¹ + Reshape",["→ o (11,32768) BF16 · 721 KB","QCAU → RAB"]],
+
+ ["G1",19,2,"compute","⑥ 8 nhóm: o_g·W_OG_g",["8×(11,4096)·(4096,1024) · 0,74 GOP","GOPU · 2.816 DSP"]],
+ ["G2",20,2,"compute","⑥ GEMM out_attn = o^G·W_O",["(11,8192)·(8192,4096) · 0,74 GOP","GOPU → RAB"]],
+
+ ["R1",21,2,"compute","⑦ X′ = B_l·X + C_l·out_attn",["(4,4)·(4,4096) + (4,1)·(1,4096)","mHCE → RAB · X′ 360 KB"]],
+
+ ["P5",22,2,"compute","⑧ vec + RMSNorm",["(4,4096)→(1,16384) / token","mHCE"]],
+ ["P6",23,2,"compute","⑧ Sinh ~A′,~B′,~C′ + Sinkhorn",["→ A′_l, B′_l, C′_l · REG","mHCE"]],
+ ["P7",24,2,"compute","⑧ Trộn: x̂′ = A′_l·X′_i",["→ x̂′ (11,4096) FP8 · RAB","mHCE"]],
+
+ ["E1",25,1,"compute","⑨ GEMM x_gate = x̂′·W_G",["(11,4096)·(4096,2048) FP4 · 0,18 GOP","ECA · 4.096 DSP"]],
+ ["E2",25,2,"compute","⑨ GEMM x_up = x̂′·W_V",["(11,4096)·(4096,2048) FP4 · 0,18 GOP","ECA"]],
+ ["M1",25,3,"compute","⑨ Hash Router mod 64",["chọn 6/384 routed + gate","MRU · 128 DSP"]],
+
+ ["E3",26,2,"compute","⑨ h = Swish(x_gate) ⊙ x_up",["(11,2048) · element-wise","ECA vector unit"]],
+ ["E4",27,2,"compute","⑨ GEMM y_e = h·W_down",["(11,2048)·(2048,4096) ×(6+1) expert","ECA · W FP4 stream 88 MB"]],
+ ["M4",28,3,"compute","⑨ Weighted Sum (gate)",["Σ_e gate_e·y_e → (11,4096)","ECA"]],
+ ["M5",29,2,"compute","⑨ Cộng shared + routed",["out_moe (11,4096) BF16 · 90 KB","ECA → RAB"]],
+
+ ["R2",30,2,"compute","⑩ X_{l+1} = B′·X′ + C′·out_moe",["(4,4)·(4,4096) + (4,1)·(1,4096)","mHCE → RAB"]],
+ ["XL1",31,2,"buffer","X_{l+1} — ra layer",["(11,4,4096) BF16 · 360 KB","RAB → layer l+1"]]
+];
+
+const MAXLVL=31;
+const DIAGRAM={
+ title:"Lưu đồ dataflow thực thể — 1 layer DeepSeek (CSA), khối xếp theo level L0→L31",
+ width:1260, height:Y0+MAXLVL*LVLH+BH+40,
+ blocks:RAW_BLOCKS.map(([id,lvl,col,type,title,spec,csa,h])=>({
+   id,type,title,spec,csa:!!csa,lvl,
+   x:COLX[col], y:Y0+lvl*LVLH, w:BW, h:h||BH })),
+ /* from/to = "blockId:side", side ∈ E,W,N,S · lbl = tensor truyền trên wire.
+    bits không khai báo (kiến trúc chưa chỉ định) → không ghi nhãn /N. */
+ wires:[
+  {from:"X:S", to:"P1:N", lbl:"X_i"},
+  {from:"P1:S",to:"P2:N", lbl:"x̃_i"},
+  {from:"P2:S",to:"P3:N", lbl:"~A,~B,~C"},
+  {from:"P3:S",to:"P4:N", lbl:"A_l"},
+  {from:"X:E", to:"P4:E", lbl:"X_i"},
+  {from:"P4:S",to:"Q1:N", lbl:"X̂"},
+  {from:"P4:W",to:"K1:N", lbl:"X̂"},
+  {from:"P4:W",to:"K2:N", lbl:"X̂"},
+  {from:"P4:E",to:"K6:N", lbl:"X̂"},
+  {from:"P4:E",to:"I3:N", lbl:"X̂"},
+  {from:"K1:S",to:"K4:W", lbl:"C"},
+  {from:"K1:S",to:"K5:N", lbl:"11 token cuối"},
+  {from:"K2:S",to:"K3:N", lbl:"Z"},
+  {from:"K3:S",to:"K4:N", lbl:"S"},
+  {from:"K4:S",to:"KV:E", lbl:"C^Comp"},
+  {from:"K5:S",to:"KV:N", lbl:"SW"},
+  {from:"K6:E",to:"I4:E", lbl:"K^I (3,128)"},
+  {from:"Q1:S",to:"Q2:N", lbl:"c_Q"},
+  {from:"Q1:E",to:"I1:N", lbl:"c_Q"},
+  {from:"Q2:S",to:"Q3:N", lbl:"q_raw"},
+  {from:"Q3:S",to:"A2:N", lbl:"q (11,64,512)"},
+  {from:"I1:S",to:"I2:N", lbl:"q_I_raw"},
+  {from:"I2:S",to:"I4:N", lbl:"q_I′"},
+  {from:"I3:S",to:"I6:E", lbl:"w_h"},
+  {from:"I4:S",to:"I6:N", lbl:"raw_score′"},
+  {from:"I6:S",to:"I7:N", lbl:"score"},
+  {from:"I7:S",to:"I8:N", lbl:"idx_top"},
+  {from:"KV:E",to:"I8:W", lbl:"C^Comp lịch sử"},
+  {from:"I8:S",to:"A1:E", lbl:"kv_topk"},
+  {from:"KV:S",to:"A1:N", lbl:"C^Comp + SW"},
+  {from:"A1:S",to:"A2:W", lbl:"K, V entry"},
+  {from:"A2:S",to:"A3:N", lbl:"score_tile"},
+  {from:"A3:S",to:"A4:N", lbl:"m_run"},
+  {from:"A4:S",to:"A5:N", lbl:"ℓ"},
+  {from:"A5:S",to:"A6:N", lbl:"acc_V"},
+  {from:"A6:S",to:"A7:N", lbl:"(11,64,512)"},
+  {from:"A7:S",to:"G1:N", lbl:"o"},
+  {from:"G1:S",to:"G2:N", lbl:"o^G (11,8192)"},
+  {from:"G2:S",to:"R1:N", lbl:"out_attn"},
+  {from:"X:W", to:"R1:W", lbl:"X (residual)"},
+  {from:"P3:E",to:"R1:E", lbl:"B_l, C_l"},
+  {from:"R1:S",to:"P5:N", lbl:"X′"},
+  {from:"R1:W",to:"R2:W", lbl:"X′ (residual)"},
+  {from:"P5:S",to:"P6:N", lbl:"x̃′"},
+  {from:"P6:S",to:"P7:N", lbl:"A′_l"},
+  {from:"P6:E",to:"R2:E", lbl:"B′_l, C′_l"},
+  {from:"P7:S",to:"E2:N", lbl:"x̂′"},
+  {from:"P7:W",to:"E1:N", lbl:"x̂′"},
+  {from:"P7:E",to:"M1:N", lbl:"TokenID"},
+  {from:"E1:S",to:"E3:W", lbl:"x_gate"},
+  {from:"E2:S",to:"E3:N", lbl:"x_up"},
+  {from:"E3:S",to:"E4:N", lbl:"h"},
+  {from:"E4:S",to:"M5:N", lbl:"x_Shared"},
+  {from:"E4:E",to:"M4:N", lbl:"y_e (6 routed)"},
+  {from:"M1:S",to:"M4:E", lbl:"S, gate"},
+  {from:"M4:S",to:"M5:E", lbl:"x_routed"},
+  {from:"M5:S",to:"R2:N", lbl:"out_moe"},
+  {from:"R2:S",to:"XL1:N",lbl:"X_{l+1}"}
+ ]
+};
+
+/* ============================================================
+   RENDER + ROUTER orthogonal — A* grid router với jump arc.
+   (theo block-template.html của chuẩn hw-diagram; MAX_ITER nâng
+   cho sơ đồ dài, thêm nhãn tensor và nhãn level)
+   ============================================================ */
+const NS="http://www.w3.org/2000/svg";
+const svg=document.getElementById("svg");
+svg.setAttribute("viewBox",`0 0 ${DIAGRAM.width} ${DIAGRAM.height}`);
+svg.setAttribute("width",DIAGRAM.width);
+document.getElementById("title").textContent=DIAGRAM.title;
+
+const blk={}; DIAGRAM.blocks.forEach(b=>blk[b.id]=b);
+
+function port(spec){
+  const [id,side]=spec.split(":");
+  const b=blk[id];
+  switch(side){
+    case "E": return {x:b.x+b.w, y:b.y+b.h/2, dir:[1,0],  blkId:id};
+    case "W": return {x:b.x,     y:b.y+b.h/2, dir:[-1,0], blkId:id};
+    case "N": return {x:b.x+b.w/2, y:b.y,     dir:[0,-1], blkId:id};
+    case "S": return {x:b.x+b.w/2, y:b.y+b.h, dir:[0,1],  blkId:id};
+  }
+}
+
+const GRID = 10;
+const STUB  = 20;
+const COST_WALL   = 1e9;
+const COST_MARGIN = 8;
+const COST_WIRE   = 3;
+const COST_BEND   = 4;
+const MAX_ITER    = 60000;
+
+let GW, GH, grid, wireHeat;
+
+function initGrid(){
+  GW = Math.ceil(DIAGRAM.width  / GRID) + 2;
+  GH = Math.ceil(DIAGRAM.height / GRID) + 2;
+  grid    = new Uint8Array(GW * GH);
+  wireHeat= new Uint8Array(GW * GH);
+  DIAGRAM.blocks.forEach(b=>{
+    const x0=Math.floor(b.x/GRID), y0=Math.floor(b.y/GRID);
+    const x1=Math.ceil((b.x+b.w)/GRID), y1=Math.ceil((b.y+b.h)/GRID);
+    for(let gy=y0;gy<=y1;gy++) for(let gx=x0;gx<=x1;gx++) setG(gx,gy,2);
+    for(let gy=y0-1;gy<=y1+1;gy++) for(let gx=x0-1;gx<=x1+1;gx++)
+      if(getG(gx,gy)<2) setG(gx,gy,1);
+  });
+}
+function getG(gx,gy){ return (gx<0||gy<0||gx>=GW||gy>=GH)?2:grid[gy*GW+gx]; }
+function setG(gx,gy,v){ if(gx>=0&&gy>=0&&gx<GW&&gy<GH) grid[gy*GW+gx]=Math.max(grid[gy*GW+gx],v); }
+function heatG(gx,gy){ if(gx>=0&&gy>=0&&gx<GW&&gy<GH) wireHeat[gy*GW+gx]++; }
+function getHeat(gx,gy){ return (gx<0||gy<0||gx>=GW||gy>=GH)?0:wireHeat[gy*GW+gx]; }
+function cellCost(gx,gy){
+  const g=getG(gx,gy);
+  if(g===2) return COST_WALL;
+  return (g===1?COST_MARGIN:1) + getHeat(gx,gy)*COST_WIRE;
+}
+function snap(px){ return Math.round(px/GRID); }
+
+function astar(sx,sy,ex,ey,startDir){
+  const key=(gx,gy,d)=>gx+GW*gy+(d<<20);
+  const g=new Map(), f=new Map(), from=new Map();
+  const open=[];
+  function push(gx,gy,d,gv,fv,pk){
+    const k=key(gx,gy,d); if(g.has(k)&&g.get(k)<=gv) return;
+    g.set(k,gv); f.set(k,fv); from.set(k,pk);
+    let lo=0,hi=open.length;
+    while(lo<hi){const mid=(lo+hi)>>1; open[mid][0]<fv?lo=mid+1:hi=mid;}
+    open.splice(lo,0,[fv,gx,gy,d,k]);
+  }
+  const h=(gx,gy)=>(Math.abs(gx-ex)+Math.abs(gy-ey))*GRID;
+  push(sx,sy,startDir,0,h(sx,sy),null);
+  let iter=0;
+  while(open.length&&iter++<MAX_ITER){
+    const [,cx,cy,cd,ck]=open.shift();
+    if(cx===ex&&cy===ey){
+      const pts=[[ex*GRID,ey*GRID]];
+      let cur=ck;
+      while(from.get(cur)!==null){
+        cur=from.get(cur);
+        const d2=cur>>20, idx=cur-(d2<<20);
+        const gx3=idx%GW, gy3=Math.floor(idx/GW);
+        pts.push([gx3*GRID,gy3*GRID]);
+      }
+      pts.reverse();
+      return pts;
+    }
+    const dirs=[[1,0,0],[-1,0,0],[0,1,1],[0,-1,1]];
+    for(const [dx,dy,nd] of dirs){
+      const nx=cx+dx,ny=cy+dy;
+      const c=cellCost(nx,ny); if(c>=COST_WALL) continue;
+      const bend=(cd!==2&&nd!==cd)?COST_BEND:0;
+      const ng=g.get(ck)+c+bend;
+      push(nx,ny,nd,ng,ng+h(nx,ny),ck);
+    }
+  }
+  return null;
+}
+
+function routeLZ(p1,p2){
+  const h1=p1.dir[0]!==0, h2=p2.dir[0]!==0;
+  const pts=[[p1.x,p1.y]];
+  if(h1!==h2){ if(h1) pts.push([p2.x,p1.y]); else pts.push([p1.x,p2.y]); }
+  else if(h1){ const mx=(p1.x+p2.x)/2; pts.push([mx,p1.y],[mx,p2.y]); }
+  else        { const my=(p1.y+p2.y)/2; pts.push([p1.x,my],[p2.x,my]); }
+  pts.push([p2.x,p2.y]);
+  return simplify(pts);
+}
+
+function route(p1,p2){
+  const sx=p1.x+p1.dir[0]*STUB, sy=p1.y+p1.dir[1]*STUB;
+  const ex=p2.x+p2.dir[0]*STUB, ey=p2.y+p2.dir[1]*STUB;
+  const gsx=snap(sx),gsy=snap(sy),gex=snap(ex),gey=snap(ey);
+  const sd=p1.dir[0]!==0?0:1;
+  const inner=astar(gsx,gsy,gex,gey,sd);
+  let pts;
+  if(inner){
+    inner.forEach(([px2,py2])=>heatG(snap(px2),snap(py2)));
+    pts=[[p1.x,p1.y],[sx,sy],...inner,[ex,ey],[p2.x,p2.y]];
+  } else {
+    pts=routeLZ(p1,p2);
+  }
+  return simplify(pts);
+}
+
+function simplify(pts){
+  const u=[];
+  for(const p of pts)
+    if(!u.length||p[0]!==u[u.length-1][0]||p[1]!==u[u.length-1][1]) u.push(p);
+  if(u.length<3) return u;
+  const r=[u[0]];
+  for(let i=1;i<u.length-1;i++){
+    const a=r[r.length-1],b=u[i],c=u[i+1];
+    const col=(a[0]===b[0]&&b[0]===c[0])||(a[1]===b[1]&&b[1]===c[1]);
+    if(!col) r.push(b);
+  }
+  r.push(u[u.length-1]);
+  return r;
+}
+
+function midSeg(pts){
+  let best=0,bi=0;
+  for(let i=0;i<pts.length-1;i++){
+    const d=Math.abs(pts[i][0]-pts[i+1][0])+Math.abs(pts[i][1]-pts[i+1][1]);
+    if(d>best){best=d;bi=i;}
+  }
+  return [(pts[bi][0]+pts[bi+1][0])/2,(pts[bi][1]+pts[bi+1][1])/2];
+}
+
+const JUMP_R = 5;
+function segIntersect(ax,ay,bx,by, cx,cy,dx,dy){
+  const abH=(ay===by), cdH=(cy===dy);
+  if(abH===cdH) return null;
+  let hx1,hx2,hy, vx,vy1,vy2;
+  if(abH){ hx1=Math.min(ax,bx);hx2=Math.max(ax,bx);hy=ay; vx=cx;vy1=Math.min(cy,dy);vy2=Math.max(cy,dy); }
+  else    { hx1=Math.min(cx,dx);hx2=Math.max(cx,dx);hy=cy; vx=ax;vy1=Math.min(ay,by);vy2=Math.max(ay,by); }
+  if(vx>hx1&&vx<hx2&&hy>vy1&&hy<vy2) return {x:vx,y:hy,hIsFirst:abH};
+  return null;
+}
+function buildPaths(allPts){
+  const segs=allPts.map(pts=>{
+    const s=[];
+    for(let i=0;i<pts.length-1;i++) s.push([pts[i][0],pts[i][1],pts[i+1][0],pts[i+1][1]]);
+    return s;
+  });
+  const jumps=allPts.map(()=>[]);
+  for(let i=0;i<segs.length;i++){
+    for(let j=i+1;j<segs.length;j++){
+      for(let si=0;si<segs[i].length;si++){
+        for(let sj=0;sj<segs[j].length;sj++){
+          const [ax,ay,bx,by]=segs[i][si];
+          const [cx,cy,dx,dy]=segs[j][sj];
+          const ix=segIntersect(ax,ay,bx,by,cx,cy,dx,dy);
+          if(!ix) continue;
+          jumps[j].push({segIdx:sj, x:ix.x, y:ix.y});
+        }
+      }
+    }
+  }
+  return allPts.map((pts,wi)=>{
+    const myJumps=jumps[wi];
+    if(!myJumps.length){
+      return pts.map((p,i)=>(i?"L":"M")+p[0]+" "+p[1]).join(" ");
+    }
+    myJumps.sort((a,b)=>a.segIdx-b.segIdx||a.x-b.x||a.y-b.y);
+    let d="M"+pts[0][0]+" "+pts[0][1];
+    let jIdx=0;
+    for(let si=0;si<pts.length-1;si++){
+      const [ax,ay,bx,by]=[pts[si][0],pts[si][1],pts[si+1][0],pts[si+1][1]];
+      const isH=(ay===by);
+      const segJumps=[];
+      while(jIdx<myJumps.length&&myJumps[jIdx].segIdx===si){
+        segJumps.push(myJumps[jIdx++]);
+      }
+      segJumps.sort((a,b)=>isH?(a.x-b.x):(a.y-b.y));
+      for(const jmp of segJumps){
+        const jx=jmp.x, jy=jmp.y, r=JUMP_R;
+        if(isH){
+          const dir=bx>ax?1:-1;
+          d+=` L${jx-dir*r} ${jy}`;
+          d+=` A${r} ${r} 0 0 ${dir>0?1:0} ${jx+dir*r} ${jy}`;
+        } else {
+          const dir=by>ay?1:-1;
+          d+=` L${jx} ${jy-dir*r}`;
+          d+=` A${r} ${r} 0 0 ${dir>0?0:1} ${jx} ${jy+dir*r}`;
+        }
+      }
+      d+=` L${bx} ${by}`;
+    }
+    return d;
+  });
+}
+
+const WIRE_COLORS=["#2563eb","#16a34a","#ea580c","#7c3aed","#0891b2","#db2777","#ca8a04","#0d9488"];
+const defs=document.createElementNS(NS,"defs");
+defs.innerHTML=WIRE_COLORS.map((c,i)=>
+  `<marker id="arr${i}" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="7"
+    refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="${c}"/></marker>`
+).join("");
+svg.appendChild(defs);
+
+initGrid();
+const allPts = DIAGRAM.wires.map(w => route(port(w.from), port(w.to)));
+const pathDs = buildPaths(allPts);
+
+DIAGRAM.wires.forEach((w,wi)=>{
+  const col=WIRE_COLORS[wi % WIRE_COLORS.length];
+  const pts=allPts[wi];
+  const sw=Math.max(1.5, Math.min(6, Math.log2(w.bits||2)));
+  const path=document.createElementNS(NS,"path");
+  path.setAttribute("d",pathDs[wi]);
+  path.setAttribute("class","wire");
+  path.style.stroke=col;
+  path.setAttribute("stroke-width",sw);
+  path.setAttribute("marker-end",`url(#arr${wi % WIRE_COLORS.length})`);
+  svg.appendChild(path);
+  /* nhãn số bit — chỉ khi w.bits khai báo (ở sơ đồ này không có) */
+  if(w.bits != null){
+    const m=midSeg(pts);
+    const label="/"+String(w.bits);
+    const bg=document.createElementNS(NS,"rect");
+    const tw=label.length*6.4+8;
+    bg.setAttribute("x",m[0]-tw/2); bg.setAttribute("y",m[1]-8);
+    bg.setAttribute("width",tw); bg.setAttribute("height",16);
+    bg.setAttribute("rx",3); bg.setAttribute("class","wire-lbl-bg");
+    svg.appendChild(bg);
+    const tx=document.createElementNS(NS,"text");
+    tx.setAttribute("x",m[0]); tx.setAttribute("y",m[1]+4);
+    tx.setAttribute("text-anchor","middle"); tx.setAttribute("class","wire-lbl");
+    tx.style.fill=col; tx.style.fontWeight="700";
+    tx.textContent=label; svg.appendChild(tx);
+  }
+  /* nhãn tensor truyền trên wire */
+  if(w.lbl){
+    const m=midSeg(pts);
+    const bg=document.createElementNS(NS,"rect");
+    const tw=w.lbl.length*5.6+8;
+    bg.setAttribute("x",m[0]-tw/2); bg.setAttribute("y",m[1]-8);
+    bg.setAttribute("width",tw); bg.setAttribute("height",15);
+    bg.setAttribute("rx",3); bg.setAttribute("class","wire-lbl-bg");
+    svg.appendChild(bg);
+    const tx=document.createElementNS(NS,"text");
+    tx.setAttribute("x",m[0]); tx.setAttribute("y",m[1]+3.5);
+    tx.setAttribute("text-anchor","middle"); tx.setAttribute("class","wire-lbl");
+    tx.style.fill=col;
+    tx.textContent=w.lbl; svg.appendChild(tx);
+  }
+});
+
+/* nhãn level bên trái */
+for(let l=0;l<=MAXLVL;l++){
+  const t=document.createElementNS(NS,"text");
+  t.setAttribute("x",4); t.setAttribute("y",Y0+l*LVLH+14);
+  t.setAttribute("class","lvl-lbl");
+  t.textContent="L"+l; svg.appendChild(t);
+}
+
+DIAGRAM.blocks.forEach(b=>{
+  const r=document.createElementNS(NS,"rect");
+  r.setAttribute("x",b.x); r.setAttribute("y",b.y);
+  r.setAttribute("width",b.w); r.setAttribute("height",b.h);
+  r.setAttribute("rx",6); r.setAttribute("class","blk "+b.type+(b.csa?" csa":""));
+  svg.appendChild(r);
+  const t=document.createElementNS(NS,"text");
+  t.setAttribute("x",b.x+b.w/2); t.setAttribute("y",b.y+17);
+  t.setAttribute("text-anchor","middle"); t.setAttribute("class","blk-title");
+  t.textContent=b.title; svg.appendChild(t);
+  (b.spec||[]).forEach((s,i)=>{
+    const st=document.createElementNS(NS,"text");
+    st.setAttribute("x",b.x+b.w/2); st.setAttribute("y",b.y+33+i*13);
+    st.setAttribute("text-anchor","middle"); st.setAttribute("class","blk-spec");
+    st.textContent=s; svg.appendChild(st);
+  });
+});
+</script>
+</body>
+</html>

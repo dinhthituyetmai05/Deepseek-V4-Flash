@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepSeek-V4-Pro — Vi kiến trúc 1 chip Alveo U250 (slice 1/4 card, 8 layer)</title>
+<style>
+  :root{
+    --compute:#2563eb; --buffer:#16a34a; --memory:#ea580c; --control:#64748b;
+    --wire:#334155; --text:#0f172a;
+  }
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+       margin:0;padding:16px;color:var(--text)}
+  h1{font-size:16px;margin:0 0 2px}
+  .meta{color:#64748b;font-size:12px;margin:0 0 10px}
+  .legend{display:flex;gap:14px;font-size:12px;margin-bottom:8px;flex-wrap:wrap}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:13px;height:13px;border-radius:3px;border:1px solid rgba(0,0,0,.15)}
+  svg{border:1px solid #e2e8f0;border-radius:8px;background:#fff;max-width:100%}
+  .blk{stroke-width:2;fill:#fff}
+  .blk.compute{stroke:var(--compute)} .blk.buffer{stroke:var(--buffer)}
+  .blk.memory{stroke:var(--memory)} .blk.control{stroke:var(--control)}
+  .blk-title{font-weight:700;font-size:13px}
+  .blk-spec{font-size:11px;fill:#334155}
+  .wire{stroke:var(--wire);fill:none}
+  .wire-lbl{font-size:10px;fill:#0f172a}
+  .wire-lbl-bg{fill:#fff;opacity:.85}
+</style>
+</head>
+<body>
+<h1 id="title">Block Diagram</h1>
+<p class="meta">Đường nối chỉ ngang/dọc/góc vuông · nhãn = số bit song song (dữ liệu, từ URAM 64 b + 8 b phụ trợ) · miền buffer + MAC 500 MHz</p>
+<div class="legend">
+  <span><i class="sw" style="background:var(--compute)"></i>compute (MAC/DSP)</span>
+  <span><i class="sw" style="background:var(--buffer)"></i>buffer</span>
+  <span><i class="sw" style="background:var(--memory)"></i>memory</span>
+  <span><i class="sw" style="background:var(--control)"></i>control/DMA</span>
+</div>
+<svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+
+<script>
+/* ============================================================
+   DỮ LIỆU — chỉnh BLOCKS và WIRES cho project.
+   x,y,w,h theo pixel. Đặt khối trên lưới 20px để dễ canh góc vuông.
+   ============================================================ */
+/* 1 chip U250 = slice 1/4 card (32 head, 96 expert, 8 layer).
+   4 lane ngang = 4 SLR, mỗi lane bám 1 kênh DDR4 (weight không vượt SLR).
+   Hàng dưới: khối dùng chung (PCIe shell, Ctrl, PSA, KVB, QSFP28 ICI). */
+const LY = i => 40 + i*160;   // laneY cho SLR i
+const laneBlocks = [];
+for (let i = 0; i < 4; i++) {
+  laneBlocks.push(
+    {id:"ddr"+i, type:"memory",  x:40,  y:LY(i), w:150, h:100,
+     title:"DDR4 CH"+i+" DIMM", spec:["16 GB DDR4-2400","19,2 GB/s · 64b+ECC"]},
+    {id:"dma"+i, type:"control", x:240, y:LY(i), w:130, h:100,
+     title:"MIG + mSGDMA "+i, spec:["AXI4 512b","@300 MHz"]},
+    {id:"wtb"+i, type:"buffer",  x:420, y:LY(i), w:140, h:100,
+     title:"WTB"+i+" 2×1 MiB", spec:["32 bank × 64 b · 64 URAM","ping-pong 68 µs/tile"]},
+    {id:"front"+i, type:"compute", x:620, y:LY(i), w:180, h:100,
+     title:"FRONT ¼ — SLR"+i, spec:["1.994 DSP · 3.988 MAC","QCAU 8 head · GOPU 1 grp","¼ ACU/LIU/mHCE/MRU"]},
+    {id:"eca"+i, type:"compute", x:860, y:LY(i), w:150, h:100,
+     title:"ECA sub"+i, spec:["1.024 DSP · 2.048 MAC","24 expert · INT8","@500 MHz"]}
+  );
+}
+const DIAGRAM = {
+  title: "DeepSeek-V4-Pro — 1 chip Alveo U250 (slice 1/4 card: 32 head · 96 expert · 8 layer)",
+  width: 1260, height: 820,
+  blocks: [
+    ...laneBlocks,
+    {id:"rab", type:"buffer", x:1080, y:40, w:140, h:580,
+     title:"RAB", spec:["16 MiB · 512 URAM","4×16 bank × 64 b","h 14 MiB + tile M=8"]},
+    {id:"pcie", type:"control", x:40, y:680, w:330, h:100,
+     title:"PCIe Gen3 ×16 — XDMA shell (SLR1)", spec:["13 GB/s hiệu dụng","boot weight 25 GB ≈ 1,9 s","residual X ↔ host"]},
+    {id:"ctrl", type:"control", x:420, y:680, w:140, h:100,
+     title:"Ctrl / CtxQ", spec:["2 MB BRAM","descriptor","token queue"]},
+    {id:"psa", type:"buffer", x:620, y:680, w:180, h:100,
+     title:"PSA", spec:["6 MiB · 192 URAM","4×8 bank × 64 b","top-k 18 b · partial ∑K"]},
+    {id:"kvb", type:"buffer", x:860, y:680, w:150, h:100,
+     title:"KVB", spec:["8 MiB · 256 URAM","4×8 bank × 64 b","chia theo mục KV"]},
+    {id:"qsfp", type:"control", x:1080, y:680, w:140, h:100,
+     title:"QSFP28 ×2 ICI", spec:["2×100 GbE","ring 4 card","all-reduce · all-to-all"]}
+  ],
+  /* from/to = "blockId:side[:frac]" với side ∈ E,W,N,S; frac ∈ (0,1) dời port
+     dọc theo cạnh để nhiều đường vào một khối không trùng nhau.
+     bits = số bit song song — chỉ khai báo khi biết từ kiến trúc. */
+  wires: [
+    // lane SLR i: DDR4 → DMA → WTB → {FRONT, ECA} (weight); RAB ↔ FRONT/ECA (activation)
+    ...[0,1,2,3].flatMap(i => {
+      const fy = off => (LY(i)+off-40)/580;   // frac trên cạnh W của RAB
+      return [
+        {from:"ddr"+i+":E",       to:"dma"+i+":W",        bits:512},
+        {from:"dma"+i+":E",       to:"wtb"+i+":W",        bits:512},
+        {from:"wtb"+i+":E:0.3",   to:"front"+i+":W:0.3",  bits:2048},
+        {from:"wtb"+i+":E:0.7",   to:"eca"+i+":W:0.75",   bits:2048},
+        {from:"rab:W:"+fy(10),    to:"front"+i+":E:0.2",  bits:1024},  // X vào FRONT
+        {from:"front"+i+":E:0.8", to:"rab:W:"+fy(94),     bits:1024},  // o/ô/h ra
+        {from:"rab:W:"+fy(38),    to:"eca"+i+":E:0.35",   bits:1024},  // token dispatch vào ECA
+        {from:"eca"+i+":E:0.65",  to:"rab:W:"+fy(66),     bits:1024}   // y ra
+      ];
+    }),
+    // khối dùng chung
+    {from:"pcie:N",       to:"ddr3:S",         bits:512},  // boot weight qua host
+    {from:"ctrl:N",       to:"dma3:S"},                     // descriptor
+    {from:"front3:S",     to:"psa:N",          bits:1024},  // partial/top-k scratch
+    {from:"kvb:N",        to:"front3:S:0.7",   bits:1024},  // KV → QCAU
+    {from:"rab:S:0.3",    to:"qsfp:N:0.3"},                 // gửi ICI
+    {from:"qsfp:N:0.7",   to:"rab:S:0.7"}                   // nhận ICI
+  ]
+};
+
+/* ============================================================
+   RENDER + ROUTER orthogonal — A* grid router với jump arc.
+   Không cần sửa phần này.
+   ============================================================ */
+const NS="http://www.w3.org/2000/svg";
+const svg=document.getElementById("svg");
+svg.setAttribute("viewBox",`0 0 ${DIAGRAM.width} ${DIAGRAM.height}`);
+svg.setAttribute("width",DIAGRAM.width);
+document.getElementById("title").textContent=DIAGRAM.title;
+
+const blk={}; DIAGRAM.blocks.forEach(b=>blk[b.id]=b);
+
+/* ---------- port geometry ---------- */
+function port(spec){
+  const parts=spec.split(":");
+  const id=parts[0], side=parts[1];
+  const f=parts.length>2?parseFloat(parts[2]):0.5;  // frac dọc theo cạnh
+  const b=blk[id];
+  switch(side){
+    case "E": return {x:b.x+b.w,   y:b.y+b.h*f, dir:[1,0],  blkId:id};
+    case "W": return {x:b.x,       y:b.y+b.h*f, dir:[-1,0], blkId:id};
+    case "N": return {x:b.x+b.w*f, y:b.y,       dir:[0,-1], blkId:id};
+    case "S": return {x:b.x+b.w*f, y:b.y+b.h,   dir:[0,1],  blkId:id};
+  }
+}
+
+/* ---------- A* orthogonal router ----------
+   G: lưới GRID px. Mỗi ô có cost:
+     WALL  : bên trong block (không đi qua)
+     MARGIN: viền 1 ô quanh block (penalize cao)
+     WIRE  : ô đã có wire trước (penalize nhẹ, tránh chồng)
+     FREE  : 1
+   State: (gx, gy, dir) — dir ∈ 0=H,1=V để penalize bend.
+*/
+const GRID = 10;          // pixel/ô lưới
+const STUB  = 20;         // stub thoát port (px)
+const COST_WALL   = 1e9;
+const COST_MARGIN = 8;
+const COST_WIRE   = 12;
+const COST_BEND   = 4;    // penalize mỗi lần đổi hướng
+const MAX_ITER    = 8000; // giới hạn A* để không treo
+
+let GW, GH, grid, wireHeat; // khởi tạo sau khi biết kích thước
+
+function initGrid(){
+  GW = Math.ceil(DIAGRAM.width  / GRID) + 2;
+  GH = Math.ceil(DIAGRAM.height / GRID) + 2;
+  grid    = new Uint8Array(GW * GH); // 0=free,1=margin,2=wall
+  wireHeat= new Uint8Array(GW * GH); // đếm wire đã đi qua
+
+  DIAGRAM.blocks.forEach(b=>{
+    // wall: ô bên trong block
+    const x0=Math.floor(b.x/GRID), y0=Math.floor(b.y/GRID);
+    const x1=Math.ceil((b.x+b.w)/GRID), y1=Math.ceil((b.y+b.h)/GRID);
+    for(let gy=y0;gy<=y1;gy++) for(let gx=x0;gx<=x1;gx++)
+      setG(gx,gy,2);
+    // margin: 1 ô bao quanh (chỉ đặt nếu chưa là wall)
+    for(let gy=y0-1;gy<=y1+1;gy++) for(let gx=x0-1;gx<=x1+1;gx++)
+      if(getG(gx,gy)<2) setG(gx,gy,1);
+  });
+}
+function getG(gx,gy){ return (gx<0||gy<0||gx>=GW||gy>=GH)?2:grid[gy*GW+gx]; }
+function setG(gx,gy,v){ if(gx>=0&&gy>=0&&gx<GW&&gy<GH) grid[gy*GW+gx]=Math.max(grid[gy*GW+gx],v); }
+function heatG(gx,gy){ if(gx>=0&&gy>=0&&gx<GW&&gy<GH) wireHeat[gy*GW+gx]++; }
+function getHeat(gx,gy){ return (gx<0||gy<0||gx>=GW||gy>=GH)?0:wireHeat[gy*GW+gx]; }
+
+function cellCost(gx,gy){
+  const g=getG(gx,gy);
+  if(g===2) return COST_WALL;
+  return (g===1?COST_MARGIN:1) + getHeat(gx,gy)*COST_WIRE;
+}
+
+// snap pixel→grid (nearest)
+function snap(px){ return Math.round(px/GRID); }
+
+// A* (state = gx,gy,dir; dir=0 H, 1 V, 2=start/any)
+function astar(sx,sy,ex,ey,startDir){
+  const key=(gx,gy,d)=>gx+GW*gy+(d<<20);
+  const g=new Map(), f=new Map(), from=new Map();
+  const open=[];
+  function push(gx,gy,d,gv,fv,pk){
+    const k=key(gx,gy,d); if(g.has(k)&&g.get(k)<=gv) return;
+    g.set(k,gv); f.set(k,fv); from.set(k,pk);
+    // min-heap via sorted insert (small enough for diagram scale)
+    let lo=0,hi=open.length;
+    while(lo<hi){const mid=(lo+hi)>>1; open[mid][0]<fv?lo=mid+1:hi=mid;}
+    open.splice(lo,0,[fv,gx,gy,d,k]);
+  }
+  const h=(gx,gy)=>(Math.abs(gx-ex)+Math.abs(gy-ey))*GRID;
+  push(sx,sy,startDir,0,h(sx,sy),null);
+  let iter=0;
+  while(open.length&&iter++<MAX_ITER){
+    const [,cx,cy,cd,ck]=open.shift();
+    if(cx===ex&&cy===ey){
+      // reconstruct
+      const pts=[[ex*GRID,ey*GRID]];
+      let cur=ck;
+      while(from.get(cur)!==null){
+        cur=from.get(cur);
+        const gx2=cur&0xFFFFF, gy2=(cur>>10)&0xFFFFF; // unpack via key formula
+        // re-derive gx,gy from key: key=gx+GW*gy+(d<<20)
+        const d2=cur>>20, idx=cur-(d2<<20);
+        const gx3=idx%GW, gy3=Math.floor(idx/GW);
+        pts.push([gx3*GRID,gy3*GRID]);
+      }
+      pts.reverse();
+      return pts;
+    }
+    const dirs=[[1,0,0],[-1,0,0],[0,1,1],[0,-1,1]];
+    for(const [dx,dy,nd] of dirs){
+      const nx=cx+dx,ny=cy+dy;
+      const c=cellCost(nx,ny); if(c>=COST_WALL) continue;
+      const bend=(cd!==2&&nd!==cd)?COST_BEND:0;
+      const ng=g.get(ck)+c+bend;
+      push(nx,ny,nd,ng,ng+h(nx,ny),ck);
+    }
+  }
+  return null; // A* failed
+}
+
+/* fallback L/Z router (original logic) */
+function routeLZ(p1,p2){
+  const h1=p1.dir[0]!==0, h2=p2.dir[0]!==0;
+  const pts=[[p1.x,p1.y]];
+  if(h1!==h2){ if(h1) pts.push([p2.x,p1.y]); else pts.push([p1.x,p2.y]); }
+  else if(h1){ const mx=(p1.x+p2.x)/2; pts.push([mx,p1.y],[mx,p2.y]); }
+  else        { const my=(p1.y+p2.y)/2; pts.push([p1.x,my],[p2.x,my]); }
+  pts.push([p2.x,p2.y]);
+  return simplify(pts);
+}
+
+/* main route: stub → A* → fallback */
+function route(p1,p2){
+  // stub: thoát khỏi port STUB px theo hướng port
+  const sx=p1.x+p1.dir[0]*STUB, sy=p1.y+p1.dir[1]*STUB;
+  const ex=p2.x+p2.dir[0]*STUB, ey=p2.y+p2.dir[1]*STUB;
+
+  const gsx=snap(sx),gsy=snap(sy),gex=snap(ex),gey=snap(ey);
+  // hướng ban đầu: 0=H nếu dir ngang, 1=V nếu dir dọc
+  const sd=p1.dir[0]!==0?0:1;
+
+  const inner=astar(gsx,gsy,gex,gey,sd);
+  let pts;
+  if(inner){
+    pts=[[p1.x,p1.y],[sx,sy],...inner,[ex,ey],[p2.x,p2.y]];
+  } else {
+    pts=routeLZ(p1,p2);
+  }
+  pts=simplify(pts);
+  // đánh heat cho TOÀN tuyến (kể cả stub) để wire sau tránh chồng
+  for(let i=0;i<pts.length-1;i++){
+    const [ax,ay]=pts[i],[bx,by]=pts[i+1];
+    if(ax===bx){const y0=Math.min(ay,by),y1=Math.max(ay,by);
+      for(let y=y0;y<=y1;y+=GRID) heatG(snap(ax),snap(y));}
+    else{const x0=Math.min(ax,bx),x1=Math.max(ax,bx);
+      for(let x=x0;x<=x1;x+=GRID) heatG(snap(x),snap(ay));}
+  }
+  return pts;
+}
+
+/* ---------- helpers ---------- */
+function simplify(pts){
+  const u=[];
+  for(const p of pts)
+    if(!u.length||p[0]!==u[u.length-1][0]||p[1]!==u[u.length-1][1]) u.push(p);
+  if(u.length<3) return u;
+  const r=[u[0]];
+  for(let i=1;i<u.length-1;i++){
+    const a=r[r.length-1],b=u[i],c=u[i+1];
+    const col=(a[0]===b[0]&&b[0]===c[0])||(a[1]===b[1]&&b[1]===c[1]);
+    if(!col) r.push(b);
+  }
+  r.push(u[u.length-1]);
+  return r;
+}
+
+function midSeg(pts){ // điểm giữa của đoạn dài nhất để đặt nhãn
+  let best=0,bi=0;
+  for(let i=0;i<pts.length-1;i++){
+    const d=Math.abs(pts[i][0]-pts[i+1][0])+Math.abs(pts[i][1]-pts[i+1][1]);
+    if(d>best){best=d;bi=i;}
+  }
+  return [(pts[bi][0]+pts[bi+1][0])/2,(pts[bi][1]+pts[bi+1][1])/2];
+}
+
+/* ---------- jump arc tại điểm cắt ----------
+   Tìm mọi cặp đoạn từ hai wire khác nhau cắt nhau orthogonally.
+   Wire có index nhỏ hơn "đi dưới", wire lớn hơn vẽ arc nhảy qua.
+   Trả về SVG path data cho mỗi wire (có thể gồm nhiều đoạn + arc).
+*/
+const JUMP_R = 5; // bán kính arc (px)
+
+function segIntersect(ax,ay,bx,by, cx,cy,dx,dy){
+  // chỉ xét cắt vuông góc (một ngang, một dọc)
+  const abH=(ay===by), cdH=(cy===dy);
+  if(abH===cdH) return null; // cùng hướng, không cắt vuông
+  let hx1,hx2,hy, vx,vy1,vy2;
+  if(abH){ hx1=Math.min(ax,bx);hx2=Math.max(ax,bx);hy=ay; vx=cx;vy1=Math.min(cy,dy);vy2=Math.max(cy,dy); }
+  else    { hx1=Math.min(cx,dx);hx2=Math.max(cx,dx);hy=cy; vx=ax;vy1=Math.min(ay,by);vy2=Math.max(ay,by); }
+  if(vx>hx1&&vx<hx2&&hy>vy1&&hy<vy2) return {x:vx,y:hy,hIsFirst:abH};
+  return null;
+}
+
+function buildPaths(allPts){
+  // allPts: array of pts arrays, one per wire
+  // returns array of SVG path `d` strings with jump arcs where needed
+  const segs=allPts.map(pts=>{
+    const s=[];
+    for(let i=0;i<pts.length-1;i++) s.push([pts[i][0],pts[i][1],pts[i+1][0],pts[i+1][1]]);
+    return s;
+  });
+
+  // collect jump points per wire: wireIdx → [{segIdx, t, x, y}]
+  const jumps=allPts.map(()=>[]);
+
+  for(let i=0;i<segs.length;i++){
+    for(let j=i+1;j<segs.length;j++){
+      for(let si=0;si<segs[i].length;si++){
+        for(let sj=0;sj<segs[j].length;sj++){
+          const [ax,ay,bx,by]=segs[i][si];
+          const [cx,cy,dx,dy]=segs[j][sj];
+          const ix=segIntersect(ax,ay,bx,by,cx,cy,dx,dy);
+          if(!ix) continue;
+          // wire j jumps over wire i (higher index jumps)
+          // determine which wire is "over": j is over i
+          const iIsH=(ay===by);
+          if(ix.hIsFirst){ // wire i is H, wire j is V → j jumps
+            jumps[j].push({segIdx:sj, x:ix.x, y:ix.y});
+          } else {         // wire i is V, wire j is H → j jumps
+            jumps[j].push({segIdx:sj, x:ix.x, y:ix.y});
+          }
+        }
+      }
+    }
+  }
+
+  return allPts.map((pts,wi)=>{
+    const myJumps=jumps[wi];
+    if(!myJumps.length){
+      return pts.map((p,i)=>(i?"L":"M")+p[0]+" "+p[1]).join(" ");
+    }
+    // sort jumps by segment then by position along segment
+    myJumps.sort((a,b)=>a.segIdx-b.segIdx||a.x-b.x||a.y-b.y);
+
+    let d="M"+pts[0][0]+" "+pts[0][1];
+    let jIdx=0;
+    for(let si=0;si<pts.length-1;si++){
+      const [ax,ay,bx,by]=[pts[si][0],pts[si][1],pts[si+1][0],pts[si+1][1]];
+      const isH=(ay===by);
+      // collect jumps on this segment
+      const segJumps=[];
+      while(jIdx<myJumps.length&&myJumps[jIdx].segIdx===si){
+        segJumps.push(myJumps[jIdx++]);
+      }
+      // sort along segment direction
+      segJumps.sort((a,b)=>isH?(a.x-b.x):(a.y-b.y));
+
+      let cx=ax,cy=ay;
+      for(const jmp of segJumps){
+        const jx=jmp.x, jy=jmp.y;
+        const r=JUMP_R;
+        if(isH){
+          const dir=bx>ax?1:-1;
+          d+=` L${jx-dir*r} ${jy}`;
+          d+=` A${r} ${r} 0 0 ${dir>0?1:0} ${jx+dir*r} ${jy}`;
+        } else {
+          const dir=by>ay?1:-1;
+          d+=` L${jx} ${jy-dir*r}`;
+          d+=` A${r} ${r} 0 0 ${dir>0?0:1} ${jx} ${jy+dir*r}`;
+        }
+        cx=isH?jx+( bx>ax?r:-r):jx;
+        cy=isH?jy:jy+(by>ay?r:-r);
+      }
+      d+=` L${bx} ${by}`;
+    }
+    return d;
+  });
+}
+
+// bảng màu cho đường nối (mỗi đường một màu cho dễ phân biệt)
+const WIRE_COLORS=["#2563eb","#16a34a","#ea580c","#7c3aed","#0891b2","#db2777","#ca8a04","#0d9488"];
+
+// tạo 1 marker mũi tên nhỏ cho mỗi màu (để mũi tên cùng màu với đường)
+const defs=document.createElementNS(NS,"defs");
+defs.innerHTML=WIRE_COLORS.map((c,i)=>
+  `<marker id="arr${i}" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="7"
+    refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="${c}"/></marker>`
+).join("");
+svg.appendChild(defs);
+
+// khởi tạo lưới A* sau khi đã có DIAGRAM
+initGrid();
+
+// route tất cả wire, thu thập pts
+const allPts = DIAGRAM.wires.map(w => route(port(w.from), port(w.to)));
+
+// build path `d` strings với jump arc tại điểm cắt
+const pathDs = buildPaths(allPts);
+
+// vẽ wire trước, block sau (block che điểm vào)
+DIAGRAM.wires.forEach((w,wi)=>{
+  const col=WIRE_COLORS[wi % WIRE_COLORS.length];
+  const pts=allPts[wi];
+  const sw=Math.max(1.5, Math.min(6, Math.log2(w.bits||2)));
+  const path=document.createElementNS(NS,"path");
+  path.setAttribute("d",pathDs[wi]);
+  path.setAttribute("class","wire");
+  path.style.stroke=col;
+  path.setAttribute("stroke-width",sw);
+  path.setAttribute("marker-end",`url(#arr${wi % WIRE_COLORS.length})`);
+  svg.appendChild(path);
+  // nhãn số bit — chỉ hiển thị khi bits được khai báo trong wire
+  if(w.bits != null){
+    const m=midSeg(pts);
+    const label="/"+String(w.bits);
+    const bg=document.createElementNS(NS,"rect");
+    const tw=label.length*6.4+8;
+    bg.setAttribute("x",m[0]-tw/2); bg.setAttribute("y",m[1]-8);
+    bg.setAttribute("width",tw); bg.setAttribute("height",16);
+    bg.setAttribute("rx",3); bg.setAttribute("class","wire-lbl-bg");
+    svg.appendChild(bg);
+    const tx=document.createElementNS(NS,"text");
+    tx.setAttribute("x",m[0]); tx.setAttribute("y",m[1]+4);
+    tx.setAttribute("text-anchor","middle"); tx.setAttribute("class","wire-lbl");
+    tx.style.fill=col; tx.style.fontWeight="700";
+    tx.textContent=label; svg.appendChild(tx);
+  }
+});
+
+DIAGRAM.blocks.forEach(b=>{
+  const r=document.createElementNS(NS,"rect");
+  r.setAttribute("x",b.x); r.setAttribute("y",b.y);
+  r.setAttribute("width",b.w); r.setAttribute("height",b.h);
+  r.setAttribute("rx",6); r.setAttribute("class","blk "+b.type);
+  svg.appendChild(r);
+  const t=document.createElementNS(NS,"text");
+  t.setAttribute("x",b.x+b.w/2); t.setAttribute("y",b.y+20);
+  t.setAttribute("text-anchor","middle"); t.setAttribute("class","blk-title");
+  t.textContent=b.title; svg.appendChild(t);
+  (b.spec||[]).forEach((s,i)=>{
+    const st=document.createElementNS(NS,"text");
+    st.setAttribute("x",b.x+b.w/2); st.setAttribute("y",b.y+38+i*14);
+    st.setAttribute("text-anchor","middle"); st.setAttribute("class","blk-spec");
+    st.textContent=s; svg.appendChild(st);
+  });
+});
+</script>
+</body>
+</html>

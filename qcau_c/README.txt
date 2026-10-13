@@ -1,0 +1,5 @@
+- Stay at ./
+- Download data/... to ./
+- Modify func in ./src/qcau_hw.cpp
+- Run g++-13 -std=c++23 -g -Og main_1.cpp -o main_1
+- Run compare_output.py to check

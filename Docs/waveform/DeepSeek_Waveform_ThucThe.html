@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Waveform thực thể × phần cứng — 1 layer DeepSeek CSA</title>
+<style>
+:root{--r:#2563eb;--c:#7c3aed;--w:#16a34a;--hl:#f59e0b;--text:#0f172a;--line:#e2e8f0;--mut:#64748b}
+*{box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0;
+ color:var(--text);background:#f8fafc;font-size:13px}
+header{padding:12px 16px 8px;background:#fff;border-bottom:1px solid var(--line)}
+h1{font-size:16px;margin:0 0 3px}
+.meta{color:var(--mut);font-size:12px;margin:0}
+.legend{display:flex;gap:12px;font-size:11.5px;margin:6px 0 0;flex-wrap:wrap}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.sw{width:12px;height:12px;border-radius:3px;border:1px solid rgba(0,0,0,.15);display:inline-block}
+.wrap{display:flex;gap:0;align-items:flex-start}
+.canvas{flex:1;min-width:0;padding:10px 4px 30px 10px;overflow-x:auto}
+svg{background:#fff;border:1px solid var(--line);border-radius:10px;display:block}
+.panel{width:390px;flex:none;position:sticky;top:8px;height:calc(100vh - 16px);overflow-y:auto;
+ padding:10px 12px 20px;background:#fff;border-left:1px solid var(--line)}
+.panel h3{font-size:13px;margin:2px 0 8px}
+.panel table{border-collapse:collapse;width:100%;font-size:11.6px}
+.panel td{border:1px solid var(--line);padding:4px 7px;vertical-align:top}
+.panel td:first-child{background:#f1f5f9;font-weight:700;width:96px}
+.panel .frm{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.4px;white-space:pre-wrap}
+.note{font-size:11.3px;color:var(--mut);margin:6px 0 0}
+.wf-cell{cursor:pointer;stroke:#fff;stroke-width:.6}
+.wf-cell.sel{stroke:var(--hl);stroke-width:2.4}
+.wf-lbl{font-size:8.6px;fill:#fff;font-weight:700;pointer-events:none}
+.wf-lbl.dark{fill:#334155;font-weight:600}
+.rowlbl{font-size:10.2px;font-weight:700;fill:#0f172a;cursor:pointer}
+.rowlbl.sub{font-weight:400;fill:#475569;font-size:9.6px}
+.wf-grid{stroke:#e2e8f0;stroke-width:1}
+.ophdr{font-size:9px;font-weight:800;fill:#334155}
+.opsub{font-size:7.6px;fill:#475569}
+.opdur{font-size:8.2px;font-weight:700;fill:#b45309}
+.tri{font-size:9px;fill:#94a3b8}
+</style>
+</head>
+<body>
+<header>
+<h1>Waveform: thứ tự phép toán và biến của dataflow thực thể trên từng khối phần cứng — 1 layer DeepSeek CSA (B=1, n=11 token, ~3,4 ms/layer)</h1>
+<p class="meta">Cột = phép toán ①–⑩ theo dataflow thực thể (độ rộng ≈ thời lượng; thời lượng = max(stream weight DDR4 @65,3 GB/s, compute @peak FU)) · Hàng = kênh DMA / bus / buffer / FU — bấm ▶ ở nhãn hàng để trải sub-row từng thực thể · Ô ghi <b>tên biến + dung lượng</b> (đọc xanh dương / ghi xanh lá / tính tím) · BẤM Ô → panel phải: công thức, biến vào/ra + khối lưu, GOP, AI, memory- hay compute-bound.</p>
+<div class="legend">
+ <span><i class="sw" style="background:var(--r)"></i>đọc (RD)</span>
+ <span><i class="sw" style="background:var(--c)"></i>tính (MAC)</span>
+ <span><i class="sw" style="background:var(--w)"></i>ghi (WR)</span>
+ <span>·&nbsp;B=1 prefill 11 token: mọi GEMM lớn đều <b>memory-bound</b> (AI = 2n = 22 FLOP/B weight &lt; ridge) — thời gian ô ≈ bytes weight ÷ 65,3 GB/s</span>
+</div>
+</header>
+
+<div class="wrap">
+<div class="canvas"><svg id="wf" xmlns="http://www.w3.org/2000/svg"></svg></div>
+<aside class="panel">
+ <h3>Chi tiết ô</h3>
+ <p class="note" id="phint">Bấm một ô trên waveform. Panel hiển thị: công thức của thực thể (đúng ký hiệu dataflow thực thể), biến vào/ra kèm khối lưu (RAB/WTB/KVB/PSA/DDR4/REG), khối lượng GOP, cửa sổ thời gian và kết luận memory-/compute-bound.</p>
+ <div id="pbody"></div>
+</aside>
+</div>
+
+<script>
+"use strict";
+const NS="http://www.w3.org/2000/svg";
+function E(p,t,a,txt){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);if(txt!=null)e.textContent=txt;p.appendChild(e);return e}
+
+/* ================= cột: phép toán ①–⑩ của dataflow thực thể ================= */
+const OPS=[
+ {id:1,sym:"①",m:"Pre_Block mHC: x̂=A_l·RMSNorm-mix(X_l)",fu:"mHCE",w:86,dur:"~0,07 ms"},
+ {id:2,sym:"②",m:"KV_Compress: C,Z → C^Comp + SW",fu:"ACU",w:112,dur:"~0,30 ms"},
+ {id:3,sym:"③",m:"Query Proj: c_Q → q (RoPE)",fu:"LIU·QCAU",w:132,dur:"~0,57 ms"},
+ {id:4,sym:"④",m:"Indexer: K^I·q_I → top-k → gather",fu:"LIU·DMA",w:92,dur:"~0,08 ms"},
+ {id:5,sym:"⑤",m:"Core Attention: online softmax + sink",fu:"QCAU",w:96,dur:"~0,02 ms"},
+ {id:6,sym:"⑥",m:"Grouped Out Proj: o·W_OG·W_O",fu:"GOPU",w:140,dur:"~1,03 ms"},
+ {id:7,sym:"⑦",m:"Mix attn: X′=B·X+C·out_attn",fu:"mHCE",w:58,dur:"~0,01 ms"},
+ {id:8,sym:"⑧",m:"Post_Block mHC: x̂′=A′·mix(X′)",fu:"mHCE",w:84,dur:"~0,07 ms"},
+ {id:9,sym:"⑨",m:"MoE: 6/384 routed + shared (SwiGLU)",fu:"MRU·ECA",w:186,dur:"~1,35 ms"},
+ {id:10,sym:"⑩",m:"Mix MoE: X_{l+1}=B′·X′+C′·out_moe",fu:"mHCE",w:58,dur:"~0,01 ms"}];
+
+/* ================= hàng & ô =================
+ cells: [op, ac(r|w|c), label, tip]  — ô chiếm trọn cột op
+ sub:   cells [op, f0, f1, ac, label, tip] — vị trí phân số trong cột */
+const ROWS=[
+{id:"dmaw",n:"mSGDMA-WT — RD DDR4 (EWD prefetch +1 op)",cells:[
+  [1,"r","W_KV·W_Z 8,4 MB","prefetch weight ② trong lúc mHCE chạy ①"],
+  [2,"r","W_DQ·W_KV,idx·W_w 5,5 MB","prefetch ③(c_Q) + ④(K^I, w_h)"],
+  [3,"r","W_UQ 33,6 MB + W_UQ,idx 4,2","prefetch ③(q) và ④(q_I) — cột ③ dài vì stream 37,8 MB"],
+  [4,"r","W_OG ×8 33,6 MB","bắt đầu prefetch ⑥"],
+  [5,"r","W_OG (tiếp)",""],
+  [6,"r","W_O 33,6 MB","nửa sau cột ⑥"],
+  [8,"r","W′_φ 0,4 MB + expert 1..2","prefetch ⑧ + bắt đầu stream expert ⑨"],
+  [9,"r","expert W_G,W_V,W_down (6+1)×12,6 = 88,2 MB","ĐƯỜNG GĂNG layer — FP4 stripe 4 kênh @65,3 GB/s = 1,35 ms"],
+  [10,"r","W_φ layer l+1","prefetch ① layer kế"]]},
+{id:"dmak",n:"mSGDMA-KV — DDR4 append / gather",cells:[
+  [2,"w","append C^Comp 1,5 KB","KV cache bền vững (kênh KV 19,2 GB/s)"],
+  [4,"w","append K^IComp 0,77 KB","norm-at-write từ LIU"],
+  [4,"r","gather kv_topk theo idx_top","descriptor 256b từ LIU → gom entry rời rạc DDR4 → KVB"]],
+ sub:[
+  {id:"dmak.a",n:"append (tuần tự)",cells:[[2,0.75,1,"w","C^Comp (3,512) FP8",""],[4,0.3,0.5,"w","K^IComp (3,128) BF16",""]]},
+  {id:"dmak.g",n:"gather (rời rạc, theo descriptor)",cells:[[4,0.6,1,"r","kv_topk (11,k) entry · 6,9 KB","QCAU không phải tự nạp — ô stall của QCAU nằm ở đây"]]}]},
+{id:"wtb",n:"WTB — weight tile 4 MB (double-buffer) → FU",cells:[
+  [2,"r","ACU đọc W_KV,W_Z 8,4 MB",""],
+  [3,"r","LIU đọc W_DQ 4,2 · QCAU đọc W_UQ 33,6",""],
+  [4,"r","LIU đọc W_UQ,idx 4,2 FP4",""],
+  [6,"r","GOPU đọc W_OG+W_O 67,1 MB",""],
+  [8,"r","mHCE đọc W′_φ 0,4",""],
+  [9,"r","ECA đọc expert FP4 88,2 MB","dequant FP4→INT8 inline trên WT-bus"]]},
+{id:"rabr",n:"RAB đọc (activation → FU)",cells:[
+  [1,"r","X_l 360 KB","mHCE đọc residual 4 dòng"],
+  [2,"r","X̂ 45 KB","ACU"],
+  [3,"r","X̂ 45 + c_Q 11,3 KB","LIU đọc X̂; QCAU đọc c_Q"],
+  [4,"r","c_Q 11,3 + X̂ 45 KB","LIU: q_I từ c_Q · w_h từ X̂"],
+  [5,"r","q 721 KB","QCAU đọc query đủ 64 head"],
+  [6,"r","o 721 KB","GOPU đọc 8 nhóm"],
+  [7,"r","X_l 360 + out_attn 90 KB","mHCE mix"],
+  [8,"r","X′ 360 KB","mHCE post-block"],
+  [9,"r","x̂′ 45 KB ×(6+1) lượt","broadcast cho vòng expert"],
+  [10,"r","X′ 360 + out_moe 90 KB","mHCE mix cuối"]]},
+{id:"rabw",n:"RAB ghi (FU → activation)",cells:[
+  [1,"w","X̂ 45 KB","từ mHCE"],
+  [3,"w","c_Q 11,3 KB · q 721 KB","LIU ghi c_Q; QCAU ghi q"],
+  [5,"w","o 721 KB","QCAU sau RoPE⁻¹"],
+  [6,"w","out_attn 90 KB","GOPU"],
+  [7,"w","X′ 360 KB","mHCE"],
+  [8,"w","x̂′ 45 KB","mHCE"],
+  [9,"w","h 45 KB/expert · out_moe 90 KB","ECA"],
+  [10,"w","X_{l+1} 360 KB","mHCE — sang layer l+1"]]},
+{id:"kvb",n:"KVB — KV buffer (URAM)",cells:[
+  [2,"w","C^Comp (3,512) FP8 + SW (11,512)","ACU ghi norm-at-write"],
+  [4,"w","K^IComp (3,128) · kv_topk vào","LIU ghi K^I; DMA nạp kv_topk"],
+  [5,"r","14 entry × 576 B = 8,1 KB","QCAU đọc kv_topk + SW, dùng chung 64 head (MQA)"]],
+ sub:[
+  {id:"kvb.b",n:"port B: ACU/LIU ghi · DMA nạp",cells:[
+    [2,0.7,1,"w","C^Comp + SW",""],[4,0.25,0.5,"w","K^IComp",""],[4,0.6,1,"w","kv_topk ← DDR",""]]},
+  {id:"kvb.a",n:"port A: cấp K,V cho core attention",cells:[
+    [4,0.05,0.45,"r","K^IComp lịch sử → LIU","cho raw_score"],[5,0.05,0.95,"r","kv_topk+SW → QCAU",""]]}]},
+{id:"psa",n:"PSA — scratch (BRAM)",cells:[
+  [2,"w","C, Z, S (a‖b) 2×11,3 KB","trung gian nén — bỏ sau khi ra C^Comp"],
+  [4,"w","q_I′ 90 · w_h 1,4 · raw_score′ 4,2 · idx_top 2,2 KB","toàn bộ biến trung gian indexer"],
+  [5,"w","score_tile 90 KB · m_run·ℓ 5,6 KB · acc_V 5,8 MB FP32","trạng thái online softmax"],
+  [9,"w","S+gate <1 KB · x_gate·x_up 90 KB · x_RoutedExpert 540 KB","router + trung gian expert"]]},
+
+/* ---------------- FU: sub-row = từng thực thể phép toán ---------------- */
+{id:"mhce",n:"mHCE (64 DSP · 0,15 TOPS)",cells:[
+  [1,"c","① 0,01 GOP","4 thực thể: vec+RMSNorm → ~A~B~C → Sinkhorn → x̂=A·X"],
+  [7,"c","⑦ mix",""],[8,"c","⑧ 0,01 GOP",""],[10,"c","⑩ mix",""]],
+ sub:[
+  {id:"mhce.r",n:"R: đọc X_i (4,4096)/token ← RAB",cells:[[1,0,0.2,"r","X_l",""],[7,0,0.3,"r","X_l+out_attn",""],[8,0,0.2,"r","X′",""],[10,0,0.3,"r","X′+out_moe",""]]},
+  {id:"mhce.c1",n:"C: x̃_i = RMSNorm(vec(X_i)) — (1,16384)",cells:[[1,0.1,0.35,"c","vec + RMSNorm",""],[8,0.1,0.35,"c","vec + RMSNorm",""]]},
+  {id:"mhce.c2",n:"C: ~A,~B,~C = x̃_i·W_φ → Sinkhorn 20 vòng",cells:[[1,0.3,0.62,"c","~B→B (S_c,S_r) · σ(~A),σ(~C)","A,B,C (1,4)(4,4)(4,1) FP32 ở REG — dùng lại ⑦"],[8,0.3,0.62,"c","→ A′,B′,C′ (REG)","dùng lại ⑩"]]},
+  {id:"mhce.c3",n:"C: trộn x̂_i = A_l·X_i — (1,4)·(4,4096)",cells:[[1,0.58,0.85,"c","x̂ = A·X",""],[8,0.58,0.85,"c","x̂′ = A′·X′",""]]},
+  {id:"mhce.c4",n:"C: mix residual B·X + C·out (CHỜ FU khác)",cells:[[7,0.25,0.85,"c","X′=B_l·X+C_l·out_attn","CHỜ GOPU ghi out_attn — điểm đồng bộ"],[10,0.25,0.85,"c","X_{l+1}=B′·X′+C′·out_moe","CHỜ ECA ghi out_moe"]]},
+  {id:"mhce.w",n:"W: ghi kết quả → RAB",cells:[[1,0.82,1,"w","X̂ 45 KB",""],[7,0.8,1,"w","X′ 360 KB",""],[8,0.82,1,"w","x̂′ 45 KB",""],[10,0.8,1,"w","X_{l+1} 360 KB",""]]}]},
+{id:"acu",n:"ACU (512 DSP · 1,23 TOPS)",cells:[
+  [2,"c","② 0,37 GOP @1,23 TOPS → 0,30 ms","chuỗi 4 thực thể: C, Z → S → C^Comp → SW"]],
+ sub:[
+  {id:"acu.r",n:"R: X̂ ← RAB · W_KV,W_Z ← WTB",cells:[[2,0,0.25,"r","X̂ 45 KB + W 8,4 MB",""]]},
+  {id:"acu.g",n:"C: GEMM C = X̂·W_KV · Z = X̂·W_Z (a‖b)",cells:[[2,0.12,0.55,"c","C, Z (11,512)×2 → PSA","4 GEMM (4096×512)"]]},
+  {id:"acu.sm",n:"C: S = Softmax_row(Z_khối m=4 + B)",cells:[[2,0.5,0.72,"c","S (11,512) theo khối","exp bằng LUT"]]},
+  {id:"acu.cc",n:"C: C^Comp = Σ_m S⊙C (a+b) + SW append",cells:[[2,0.68,0.9,"c","C^Comp (3,512) · SW 11 token","hợp nhất 2 nhánh đúng file nguồn"]]},
+  {id:"acu.w",n:"W: C^Comp + SW → KVB (norm-at-write)",cells:[[2,0.86,1,"w","1,5 + 5,6 KB → KVB·DDR",""]]}]},
+{id:"liu",n:"LIU (768 DSP · 1,84 TOPS)",cells:[
+  [3,"c","③a c_Q 0,09 GOP",""],
+  [4,"c","④ indexer 0,2 GOP","K^I → q_I → score → top-k"]],
+ sub:[
+  {id:"liu.cq",n:"C: c_Q = RMSNorm(X̂·W_DQ) — (11,1024)",cells:[[3,0.05,0.4,"c","c_Q → RAB","GEMM 4096×1024 + norm"]]},
+  {id:"liu.ki",n:"C: K^I = X̂·W_KV,idx, nén m=4 (a+b)",cells:[[4,0.02,0.28,"c","K^IComp (3,128) BF16","ghi KVB port B + append DDR"]]},
+  {id:"liu.qi",n:"C: q_I = c_Q·W_UQ,idx → reshape → ×H(128,128)",cells:[[4,0.2,0.5,"c","q_I′ (11,64,128) → PSA",""]]},
+  {id:"liu.wh",n:"C: w_h = a(X̂·W_w) — (11,64)",cells:[[4,0.3,0.45,"c","w_h → PSA","trọng số gộp head"]]},
+  {id:"liu.sc",n:"C: raw_score = q_I′·K^{I,T} → ReLU → Σ_h w_h⊙",cells:[[4,0.45,0.75,"c","score (11,3) → PSA",""]]},
+  {id:"liu.tk",n:"C: top-k (bitonic LUT) → idx_top",cells:[[4,0.72,0.92,"c","idx_top (11,k) INT32","không tốn DSP"]]},
+  {id:"liu.w",n:"W: idx_top → PSA · descriptor → mSGDMA-KV",cells:[[3,0.36,0.44,"w","c_Q 11,3 KB → RAB",""],[4,0.9,1,"w","desc 256b → DMA",""]]}]},
+{id:"qcau",n:"QCAU (3.584 DSP · 8,6 TOPS)",cells:[
+  [3,"c","③b q = c_Q·W_UQ 0,74 GOP","memory-bound: 33,6 MB weight = 0,51 ms"],
+  [5,"c","⑤ attention 0,02 GOP","vòng tile online softmax + sink"]],
+ sub:[
+  {id:"qcau.g",n:"C: q_raw = c_Q·W_UQ — (11,32768)",cells:[[3,0.3,0.78,"c","GEMM 1024×32768","AI = 22 FLOP/B < ridge 132 — chờ weight stream"]]},
+  {id:"qcau.ro",n:"C: reshape (11,64,512) + RMSNorm + RoPE 64 cuối",cells:[[3,0.75,0.94,"c","q̃ + RoPE (α≈0,01105)",""]]},
+  {id:"qcau.kv",n:"R: kv_topk + SW ← KVB · RMSNorm+RoPE entry",cells:[[5,0.02,0.3,"r","14 entry × 576 B","HCA: 12 entry, đọc thẳng (norm-at-write)"]]},
+  {id:"qcau.qk",n:"C: score_tile = α·q·K_tileᵀ (KV_tile=64)",cells:[[5,0.22,0.5,"c","score (11,64,64) → PSA",""]]},
+  {id:"qcau.os",n:"C: Tile max → m_run · ℓ += Σe^{s−m} (+sink)",cells:[[5,0.42,0.68,"c","m_run, ℓ (11,64) FP32","'Repeat?' đến hết entry"]]},
+  {id:"qcau.av",n:"C: acc_V += e^{s−m}·V → chia acc/ℓ → RoPE⁻¹",cells:[[5,0.6,0.9,"c","acc_V (11,64,512) FP32 5,8 MB",""]]},
+  {id:"qcau.w",n:"W: q, o → RAB",cells:[[3,0.92,1,"w","q 721 KB",""],[5,0.88,1,"w","o 721 KB",""]]}]},
+{id:"gopu",n:"GOPU (2.816 DSP · 6,76 TOPS)",cells:[
+  [6,"c","⑥ 1,48 GOP @6,76 TOPS","memory-bound: 67,1 MB weight = 1,03 ms"]],
+ sub:[
+  {id:"gopu.r",n:"R: o ← RAB · W_OG,W_O tile ← WTB",cells:[[6,0,0.2,"r","o 721 KB + 67,1 MB",""]]},
+  {id:"gopu.g1",n:"C: o_g′ = o_g·W_OG_g — 8 nhóm (4096→1024)",cells:[[6,0.12,0.55,"c","o^G (11,8192) → PSA","8 GEMM độc lập, không all-reduce"]]},
+  {id:"gopu.g2",n:"C: out_attn = o^G·W_O — (8192→4096)",cells:[[6,0.5,0.9,"c","out_attn (11,1,4096)",""]]},
+  {id:"gopu.w",n:"W: out_attn → RAB",cells:[[6,0.88,1,"w","90 KB",""]]}]},
+{id:"mru",n:"MRU (128 DSP · 0,31 TOPS)",cells:[
+  [9,"c","⑨r hash router","TokenID mod 64 — không cần GEMM"]],
+ sub:[
+  {id:"mru.h",n:"C: S_t = hash(TokenID mod 64) → 6/384 expert",cells:[[9,0.01,0.06,"c","chọn 6 routed + gate",""]]},
+  {id:"mru.w",n:"W: S + gate → PSA",cells:[[9,0.05,0.09,"w","S (11,6) + gate <1 KB","Ctrl gom token expert-major"]]}]},
+{id:"eca",n:"ECA (4.096 DSP · 9,83 TOPS)",cells:[
+  [9,"c","⑨ 3,8 GOP @9,83 TOPS → cần 0,39 ms < stream 1,35 ms","memory-bound — vòng (6+1) expert, weight FP4 chỉ đọc 1 lần"]],
+ sub:[
+  {id:"eca.loop",n:"vòng expert e = 1..6 routed + shared (expert-major)",cells:(function(){const o=[];for(let i=0;i<7;i++)o.push([9,0.08+i*0.13,0.08+i*0.13+0.11,"c","e"+(i+1),(i<6?"routed expert thứ "+(i+1):"shared expert")+" — 3 GEMM + SwiGLU trên token chạm nó"]);return o;})()},
+  {id:"eca.g1",n:"C: x_gate = x̂′·W_G · x_up = x̂′·W_V — (4096→2048)",cells:[[9,0.08,0.5,"c","x_gate, x_up (11,2048) → PSA","2 GEMM/expert, xen theo tile weight"]]},
+  {id:"eca.si",n:"C: h = Swish(x_gate) ⊙ x_up — vector unit",cells:[[9,0.3,0.65,"c","h (11,2048) → RAB","SiLU LUT, không MAC"]]},
+  {id:"eca.g2",n:"C: y_e = h·W_down — (2048→4096)",cells:[[9,0.45,0.85,"c","y_e (11,4096) → PSA",""]]},
+  {id:"eca.ws",n:"C: Σ_e gate_e·y_e + x_SharedExpert",cells:[[9,0.82,0.95,"c","weighted sum + add","x_RoutedExpert (11,4096,6) ở PSA"]]},
+  {id:"eca.w",n:"W: out_moe → RAB",cells:[[9,0.93,1,"w","out_moe 90 KB",""]]}]}
+];
+
+/* ================= DET: chi tiết từng ô (key = rowId|op) ================= */
+const DET={
+"mhce|1":{f:"x̃_i=RMSNorm(vec(X_i)) → ~A,~B,~C=x̃_i·W_φ → Sinkhorn(~B)→B, σ(~A)→A, σ(~C)→C → x̂_i=A_l·X_i",fu:"mHCE · 64 DSP · 0,15 TOPS",vin:"X_l (11,4,4096) BF16 360 KB ← RAB · W_φ 0,4 MB ← WTB",vout:"X̂ (11,4096) FP8 45 KB → RAB · A,B,C (REG, dùng lại ⑦)",num:"0,01 GOP ÷ 0,15 TOPS ≈ 0,07 ms — compute-bound cục bộ (weight quá nhỏ), không chạm DDR ngoài W_φ",note:"4 thực thể của cụm ① chạy pipeline theo token trong 1 lần quét X_l."},
+"mhce|7":{f:"X′_i = B_l·X_i + C_l·out_attn_i — (4,4)·(4,4096)+(4,1)·(1,4096)",fu:"mHCE",vin:"X_l 360 KB + out_attn 90 KB ← RAB · B_l,C_l ← REG (từ ①)",vout:"X′ (11,4,4096) 360 KB → RAB",num:"0,004 GOP — RAB-only, ~0,01 ms",note:"PHỤ THUỘC: chờ GOPU ghi out_attn — điểm đồng bộ pipeline."},
+"mhce|8":{f:"Như ① trên X′: x̃′ → ~A′,~B′,~C′ → Sinkhorn → x̂′=A′_l·X′_i",fu:"mHCE",vin:"X′ 360 KB ← RAB · W′_φ 0,4 MB ← WTB",vout:"x̂′ (11,4096) 45 KB → RAB · A′,B′,C′ (REG, dùng lại ⑩)",num:"0,01 GOP ≈ 0,07 ms",note:"Bộ hệ số MoE tính RIÊNG từ X′, không tái sử dụng bộ ①."},
+"mhce|10":{f:"X_{l+1,i} = B′_l·X′_i + C′_l·out_moe_i",fu:"mHCE",vin:"X′ 360 KB + out_moe 90 KB ← RAB · B′,C′ ← REG (từ ⑧)",vout:"X_{l+1} 360 KB → RAB (slot X)",num:"0,004 GOP ~0,01 ms",note:"Chờ ECA xong. Sau layer cuối trên chip: QSFP28 sang chip 1 / PCIe về host."},
+"acu|2":{f:"C=X̂·W_KV, Z=X̂·W_Z (a‖b) → S=Softmax_row(Z_m4+B) → C^Comp=ΣS⊙C (a+b) → +SW 11 token",fu:"ACU · 512 DSP · 1,23 TOPS",vin:"X̂ 45 KB ← RAB · W_KV,W_Z 8,4 MB ← WTB←DDR4",vout:"C^Comp (3,512) FP8 1,5 KB + SW (11,512) 5,6 KB → KVB + DDR append · C,Z,S → PSA (bỏ)",num:"0,37 GOP ÷ 1,23 TOPS = 0,30 ms > stream 8,4 MB = 0,13 ms → compute-bound (AI weight = 44 > ridge 19)",note:"Norm-at-write: RMSNorm entry trước khi ghi — QCAU đọc lại không phải chuẩn hoá."},
+"liu|3":{f:"c_Q = RMSNorm(X̂·W_DQ) — (11,4096)·(4096,1024)",fu:"LIU · 768 DSP",vin:"X̂ 45 KB ← RAB · W_DQ 4,2 MB ← WTB",vout:"c_Q (11,1024) FP8 11,3 KB → RAB",num:"0,09 GOP; stream 4,2 MB = 0,064 ms ≥ compute 0,05 ms → memory-bound nhẹ",note:"c_Q là điểm rẽ nhánh: QCAU (③b) và indexer (④) cùng đọc."},
+"liu|4":{f:"K^I=X̂·W_KV,idx (nén m=4, a+b) · q_I=c_Q·W_UQ,idx → ×H · w_h=a(X̂·W_w) · raw_score=q_I′·K^{I,T}→ReLU · score=Σ_h w_h⊙ · top-k → idx_top",fu:"LIU · 768 DSP (hệ FP thấp trọn trong 1 FU)",vin:"c_Q 11,3 KB, X̂ 45 KB ← RAB · W_UQ,idx 4,2 MB FP4, W_KV,idx 1 MB, W_w ← WTB · K^IComp (3,128) BF16 ← KVB",vout:"K^IComp → KVB+DDR · q_I′ (11,64,128) 90 KB, w_h, raw_score′, score (11,3), idx_top (11,k) → PSA · descriptor → mSGDMA-KV",num:"~0,2 GOP; stream 5,2 MB ≈ 0,08 ms — rẻ hơn attention thật ~170× nhờ 128 dim + 3 entry",note:"Chỉ CSA. HCA bỏ trọn cột ④: KV đọc = 1 entry m′=128 + SW = 12."},
+"qcau|3":{f:"q_raw = c_Q·W_UQ → reshape (11,64,512) → RMSNorm → RoPE 64 dim cuối (α = 1/√128·1/√64 ≈ 0,01105)",fu:"QCAU · 3.584 DSP · 8,6 TOPS",vin:"c_Q 11,3 KB ← RAB · W_UQ 33,6 MB ← WTB←DDR4",vout:"q (11,64,512) BF16 721 KB → RAB",num:"0,74 GOP ÷ 8,6 TOPS = 0,086 ms << stream 33,6 MB = 0,51 ms → MEMORY-BOUND (AI = 22 < ridge 132). B=1 lãng phí — batch để khấu hao weight.",note:"Cột ③ dài chủ yếu do W_UQ."},
+"qcau|5":{f:"K_e=RoPE(entry) → score=α·q·K_tileᵀ → m_run=max → ℓ+=Σe^{s−m}, +e^{sink−m} → acc_V+=e^{s−m}·V → lặp tile → out=acc_V/ℓ → RoPE⁻¹ → reshape",fu:"QCAU",vin:"q 721 KB ← RAB · kv_topk+SW 14 entry 8,1 KB ← KVB",vout:"o (11,32768) BF16 721 KB → RAB · m_run, ℓ, acc_V (FP32 5,8 MB) → PSA (reset mỗi query)",num:"~0,02 GOP, ~0,02 ms — KV on-chip, không chạm DDR",note:"Online softmax: không bao giờ giữ toàn bộ ma trận score; attention sink cộng vào mẫu số ở bước cuối."},
+"gopu|6":{f:"o_g′ = o_g·W_OG_g (8 nhóm 4096→1024) → out_attn = o^G·W_O (8192→4096)",fu:"GOPU · 2.816 DSP · 6,76 TOPS",vin:"o 721 KB ← RAB · W_OG ×8 + W_O = 67,1 MB ← WTB←DDR4",vout:"out_attn (11,1,4096) 90 KB → RAB · o^G (11,8192) → PSA",num:"1,48 GOP ÷ 6,76 TOPS = 0,22 ms << stream 67,1 MB = 1,03 ms → MEMORY-BOUND (AI = 22 < ridge 104)",note:"1 chip trọn layer nên không all-reduce."},
+"mru|9":{f:"S_t = hash(TokenID t mod 64) → 6/384 routed + gate",fu:"MRU · 128 DSP (LUT là chính)",vin:"TokenID (11,)",vout:"S (11,6) INT8 + gate FP16 <1 KB → PSA",num:"~0 GOP — tức thời",note:"File nguồn dùng hash tĩnh; router học được (GEMM 4096×384 + top-6) là phương án thay thế cho layer sâu."},
+"eca|9":{f:"mỗi expert e: x_gate=x̂′·W_G; x_up=x̂′·W_V; h=Swish(x_gate)⊙x_up; y_e=h·W_down — rồi Σ_e gate·y_e + shared",fu:"ECA · 4.096 DSP · 9,83 TOPS · 4 sub-array × 1 kênh DDR",vin:"x̂′ 45 KB ← RAB (đọc lại mỗi expert) · W expert (6+1)×12,6 MB = 88,2 MB FP4 ← WTB←DDR4 · S,gate ← PSA",vout:"out_moe (11,4096) 90 KB → RAB · x_gate,x_up,y_e,x_RoutedExpert (540 KB) → PSA · h → RAB",num:"3,8 GOP ÷ 9,83 TOPS = 0,39 ms << stream 88,2 MB = 1,35 ms → MEMORY-BOUND — ĐƯỜNG GĂNG của layer (MAC idle ~71%)",note:"Expert-major: weight mỗi expert đọc DDR đúng 1 lần; tăng batch B là cách duy nhất tăng hiệu suất."},
+"dmaw|9":{f:"Stream 7 bộ weight expert FP4, stripe 4 kênh DDR4",fu:"mSGDMA-WT ×4 kênh",vin:"DDR4: (6+1)×12,6 MB = 88,2 MB",vout:"WTB (tile 4 MB ping-pong, dequant FP4→INT8 inline)",num:"88,2 MB ÷ 65,3 GB/s = 1,35 ms — dài nhất layer",note:"EWD: descriptor phát trước theo thứ tự expert đã gom token."},
+"dmaw|3":{f:"Prefetch W_UQ (1024×32768 FP8) + W_UQ,idx trong lúc ②/③a chạy",fu:"mSGDMA-WT",vin:"DDR4 37,8 MB",vout:"WTB",num:"0,58 ms — quyết định độ dài cột ③",note:""},
+"dmak|4":{f:"append K^IComp → DDR · gather kv_topk theo idx_top (descriptor 256b từ LIU)",fu:"mSGDMA-KV (19,2 GB/s)",vin:"idx_top (11,k) ← PSA · KV cache lịch sử ← DDR4",vout:"kv_topk (k entry × 576 B) → KVB",num:"6,9 KB — tức thời; độ trễ descriptor ~µs",note:"QCAU không tự nạp KV — DMA gom entry rời rạc."},
+"kvb|5":{f:"Cấp K,V cho core attention: kv_topk + SW = 14 entry",fu:"KVB port A · 172,8 GB/s",vin:"—",vout:"→ QCAU, entry dùng lại cho 64 head (MQA)",num:"8,1 KB/query-set",note:"Entry đã norm-at-write nên đọc thẳng."},
+"psa|5":{f:"Trạng thái online softmax",fu:"PSA (BRAM)",vin:"score_tile (11,64,64) 90 KB · m_run, ℓ (11,64) FP32 · acc_V (11,64,512) FP32 5,8 MB",vout:"reset mỗi query — không bao giờ rời chip",num:"scratch lớn nhất của layer",note:""},
+"rabr|9":{f:"Broadcast x̂′ cho vòng expert",fu:"RAB · 86,4 GB/s",vin:"x̂′ 45 KB × (6+1) lượt đọc",vout:"→ 4 sub-array ECA",num:"~0,3 MB tổng",note:"Token gom expert-major nên mỗi expert đọc đúng phần token của nó."}
+};
+
+/* ================= render ================= */
+const svg=document.getElementById("wf");
+const LBL=210,HDR=50,RH=27,SRH=21;
+const opX=[LBL];OPS.forEach(o=>opX.push(opX[opX.length-1]+o.w));
+const W=opX[opX.length-1]+14;
+const expand=new Set();
+const AC={r:"var(--r)",w:"var(--w)",c:"var(--c)"};
+let SELKEY=null;
+
+function render(){
+ svg.innerHTML="";
+ const vis=[];
+ ROWS.forEach((r,ri)=>{vis.push({r,main:true});
+  if(r.sub&&expand.has(r.id))r.sub.forEach(sr=>vis.push({r:sr,main:false,parent:r}));});
+ let H=HDR+8;vis.forEach(v=>H+=v.main?RH:SRH);
+ svg.setAttribute("viewBox",`0 0 ${W} ${H}`);svg.setAttribute("width",W);svg.setAttribute("height",H);
+ /* header cột */
+ OPS.forEach((o,i)=>{
+  E(svg,"line",{x1:opX[i],x2:opX[i],y1:4,y2:H-4,class:"wf-grid"});
+  const cx=(opX[i]+opX[i+1])/2;
+  E(svg,"text",{x:cx,y:13,"text-anchor":"middle",class:"ophdr"},o.sym+" "+o.fu);
+  E(svg,"text",{x:cx,y:24,"text-anchor":"middle",class:"opsub"},
+   o.m.length>Math.floor(o.w/4.1)?o.m.slice(0,Math.floor(o.w/4.1)-1)+"…":o.m);
+  E(svg,"text",{x:cx,y:36,"text-anchor":"middle",class:"opdur"},o.dur);
+ });
+ E(svg,"line",{x1:opX[opX.length-1],x2:opX[opX.length-1],y1:4,y2:H-4,class:"wf-grid"});
+ E(svg,"line",{x1:8,x2:W-8,y1:HDR-4,y2:HDR-4,class:"wf-grid"});
+ /* hàng */
+ let y=HDR+4;
+ vis.forEach(v=>{
+  const r=v.r,h=v.main?RH:SRH;
+  const lbl=E(svg,"text",{x:v.main?10:26,y:y+h/2+3.5,class:"rowlbl"+(v.main?"":" sub")});
+  if(v.main&&r.sub){
+   const t1=document.createElementNS(NS,"tspan");t1.setAttribute("class","tri");
+   t1.textContent=expand.has(r.id)?"▼ ":"▶ ";lbl.appendChild(t1);
+  }
+  const t2=document.createElementNS(NS,"tspan");
+  let nm=r.n; const maxc=Math.floor((LBL-(v.main?14:30))/5.4);
+  t2.textContent=nm.length>maxc?nm.slice(0,maxc-1)+"…":nm;
+  lbl.appendChild(t2);
+  if(nm.length>maxc){const ti=E(svg,"title",{});ti.textContent=nm;lbl.appendChild(ti);}
+  if(v.main&&r.sub)lbl.addEventListener("click",()=>{expand.has(r.id)?expand.delete(r.id):expand.add(r.id);render();});
+  E(svg,"line",{x1:8,x2:W-8,y1:y+h,y2:y+h,class:"wf-grid","stroke-dasharray":v.main?"":"2 3"});
+  (r.cells||[]).forEach(cell=>{
+   let op,f0,f1,ac,lab,tp;
+   if(v.main){[op,ac,lab,tp]=cell;f0=0;f1=1;}
+   else {[op,f0,f1,ac,lab,tp]=cell;}
+   const i=OPS.findIndex(o=>o.id===op);if(i<0)return;
+   const x0=opX[i]+2+f0*(OPS[i].w-4), x1=opX[i]+2+f1*(OPS[i].w-4);
+   const key=(v.main?r.id:v.parent.id+"."+r.id.split(".").pop())+"|"+op;
+   const rect=E(svg,"rect",{x:x0,y:y+2.5,width:Math.max(3,x1-x0),height:h-5,rx:3,
+    class:"wf-cell",fill:AC[ac]});
+   rect.dataset.key=(v.main?r.id:r.id)+"|"+op;
+   rect.dataset.row=r.n;rect.dataset.lab=lab||"";rect.dataset.tip=tp||"";rect.dataset.ac=ac;rect.dataset.op=op;
+   if(SELKEY===rect.dataset.key+"|"+lab)rect.classList.add("sel");
+   rect.addEventListener("click",ev=>selectCell(rect));
+   const ti=E(svg,"title",{});ti.textContent=(lab||"")+(tp?" — "+tp:"");rect.appendChild(ti);
+   if(lab&&(x1-x0)>26){
+    const maxc2=Math.floor((x1-x0)/4.6);
+    E(svg,"text",{x:(x0+x1)/2,y:y+h/2+3,"text-anchor":"middle",class:"wf-lbl"},
+     lab.length>maxc2?lab.slice(0,Math.max(2,maxc2-1))+"…":lab);
+   }
+  });
+  y+=h;
+ });
+}
+function selectCell(rect){
+ document.querySelectorAll(".wf-cell").forEach(x=>x.classList.remove("sel"));
+ rect.classList.add("sel");
+ SELKEY=rect.dataset.key+"|"+rect.dataset.lab;
+ const [rowId,opS]=rect.dataset.key.split("|");
+ const op=+opS;const o=OPS.find(x=>x.id===op);
+ const baseId=rowId.split(".")[0];
+ const d=DET[rowId+"|"+op]||DET[baseId+"|"+op];
+ const pb=document.getElementById("pbody");
+ document.getElementById("phint").style.display="none";
+ const acName={r:"ĐỌC",w:"GHI",c:"TÍNH"}[rect.dataset.ac];
+ let h=`<h3>${o.sym} ${o.m}</h3>
+ <table>
+ <tr><td>Ô</td><td>${rect.dataset.row} — <b>${acName}</b>: ${rect.dataset.lab||"—"}${rect.dataset.tip?"<br><span style='color:#64748b'>"+rect.dataset.tip+"</span>":""}</td></tr>`;
+ if(d){
+  h+=`<tr><td>Công thức</td><td class="frm">${d.f}</td></tr>
+  <tr><td>FU</td><td>${d.fu}</td></tr>
+  <tr><td>Biến vào</td><td>${d.vin}</td></tr>
+  <tr><td>Biến ra</td><td>${d.vout}</td></tr>
+  <tr><td>Định lượng</td><td>${d.num}</td></tr>
+  ${d.note?`<tr><td>Ghi chú</td><td>${d.note}</td></tr>`:""}`;
+ } else {
+  h+=`<tr><td>Loại</td><td>${acName} — ${rect.dataset.ac==="c"?"xem ô compute cùng cột của FU để có công thức đầy đủ":"di chuyển dữ liệu giữa buffer và FU; AI tính tại ô TÍNH tiêu thụ nó"}</td></tr>`;
+ }
+ h+=`<tr><td>Cột thời gian</td><td>${o.sym} · FU chính: ${o.fu} · thời lượng ${o.dur}</td></tr></table>`;
+ pb.innerHTML=h;
+}
+render();
+</script>
+</body>
+</html>

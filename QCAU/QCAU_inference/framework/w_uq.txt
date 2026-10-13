@@ -1,0 +1,52 @@
+QCAU _query_up w_uq branch reference
+===================================
+
+Actual branch used by all generated framework test vectors:
+
+  model_with_qcau.py -> Attention.forward -> QCAU(..., w_uq=self.wq_b)
+  self.wq_b is a Linear/ColumnParallelLinear module
+  nn.Module is callable, so QCAU._query_up takes:
+
+      if callable(w_uq):
+          q_projected = w_uq(c_q)
+
+For these real model weights, w_uq is not passed as a plain Tensor. The module
+forward dispatches to model.linear(...), then because wq_b.weight is FP8_E4M3:
+
+  1. quantize c_q activation to FP8 in blocks of 128
+  2. use wq_b.weight FP8_E4M3 and wq_b.scale FP8_E8M0
+  3. run FP8 GEMM and return q_projected
+  4. QCAU unflattens [B,S,32768] to [B,S,64,512]
+  5. QCAU applies per-head RMS normalization
+  6. QCAU applies forward RoPE
+
+The exact w_uq files are in:
+
+  w_uq/layer2/
+  w_uq/layer3/
+  w_uq/layer4/
+  w_uq/layer5/
+
+Each layer directory contains:
+  w_uq.weight.fp8_hex.txt       raw FP8_E4M3 bytes, shape [32768,1024]
+  w_uq.scale.e8m0_hex.txt       raw FP8_E8M0 bytes, shape [256,8]
+  *.shape.txt                   tensor shapes
+  metadata.json                  layout and decode information
+
+Other _query_up branches supported by the generic QCAU.py but not used by the
+real model vectors:
+
+  1. Tensor with ndim == 2:
+       q_projected = matmul(c_q, w_uq.transpose(-1,-2))
+       expected shape [B,S,H*head_dim]
+
+  2. Tensor with ndim == 3 and shape [D_C,H,Dh]:
+       q_projected = einsum('bsd,dhc->bshc', c_q, w_uq)
+
+  3. Tensor with ndim == 3 and shape [H,D_C,Dh]:
+       q_projected = einsum('bsd,hdc->bshc', c_q, w_uq)
+
+  4. Other inputs raise ValueError.
+
+For exact reproduction of the generated vectors, implement branch 0:
+callable(w_uq), including FP8 activation quantization and FP8 GEMM.

@@ -1,0 +1,91 @@
+{
+  "num_cases": 36,
+  "cases": [
+    "hello_seq1_layer2",
+    "hello_seq1_layer3",
+    "hello_seq1_layer4",
+    "hello_seq1_layer5",
+    "hello_seq4_layer2",
+    "hello_seq4_layer3",
+    "hello_seq4_layer4",
+    "hello_seq4_layer5",
+    "hello_seq16_layer2",
+    "hello_seq16_layer3",
+    "hello_seq16_layer4",
+    "hello_seq16_layer5",
+    "hardware_seq1_layer2",
+    "hardware_seq1_layer3",
+    "hardware_seq1_layer4",
+    "hardware_seq1_layer5",
+    "hardware_seq4_layer2",
+    "hardware_seq4_layer3",
+    "hardware_seq4_layer4",
+    "hardware_seq4_layer5",
+    "hardware_seq16_layer2",
+    "hardware_seq16_layer3",
+    "hardware_seq16_layer4",
+    "hardware_seq16_layer5",
+    "numbers_seq1_layer2",
+    "numbers_seq1_layer3",
+    "numbers_seq1_layer4",
+    "numbers_seq1_layer5",
+    "numbers_seq4_layer2",
+    "numbers_seq4_layer3",
+    "numbers_seq4_layer4",
+    "numbers_seq4_layer5",
+    "numbers_seq16_layer2",
+    "numbers_seq16_layer3",
+    "numbers_seq16_layer4",
+    "numbers_seq16_layer5"
+  ],
+  "seq_lens": [
+    1,
+    4,
+    16
+  ],
+  "target_layers": [
+    2,
+    3,
+    4,
+    5
+  ],
+  "prompts": [
+    "hello",
+    "hardware",
+    "numbers"
+  ],
+  "format": "BF16 exact hex, FP32 decimal, int decimal, row-major flat",
+  "w_uq": {
+    "branch": "callable(w_uq)",
+    "directory": "w_uq",
+    "layers": [
+      2,
+      3,
+      4,
+      5
+    ],
+    "weight_dtype": "FP8_E4M3",
+    "scale_dtype": "FP8_E8M0",
+    "weight_shape": [
+      32768,
+      1024
+    ],
+    "scale_shape": [
+      256,
+      8
+    ]
+  },
+  "query_up_linear_act_quant": {
+    "branch": "callable(w_uq)",
+    "input_to_linear": "c_q",
+    "block_size": 128,
+    "scale_fmt": "ue8m0",
+    "x_file": "linear_x_after_act_quant.fp8_e4m3_hex.txt",
+    "x_dtype": "FP8_E4M3 raw uint8",
+    "x_shape": "[B,S,1024]",
+    "s_file": "linear_s_after_act_quant.e8m0_hex.txt",
+    "s_dtype": "FP8_E8M0 raw uint8",
+    "s_shape": "[B,S,8]",
+    "s_encoding": "scale = 2 ** (uint8 - 127)"
+  }
+}

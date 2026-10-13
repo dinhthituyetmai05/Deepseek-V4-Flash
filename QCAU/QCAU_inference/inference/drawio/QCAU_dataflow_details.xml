@@ -1,0 +1,725 @@
+<mxfile host="app.diagrams.net" modified="2026-09-10T00:00:00.000Z" agent="Codex" version="24.7.17" type="device">
+  <diagram id="qcau-detail-overview" name="01_Read_First_Overview">
+    <mxGraphModel dx="2400" dy="1400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2600" pageHeight="1500" math="0" shadow="0">
+      <root>
+        <mxCell id="ov-0"/>
+        <mxCell id="ov-1" parent="ov-0"/>
+        <mxCell id="ov-title" value="QCAU DETAILED DATAFLOW - READ THIS PAGE FIRST" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=26;fontStyle=1;fontColor=#17202A;" vertex="1" parent="ov-1">
+          <mxGeometry x="30" y="20" width="1700" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="ov-sub" value="Current code reference: inference/QCAU.py + inference/model.py | Shapes below use inference/config.json defaults and show MP=1 plus MP=4 local examples." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=14;fontColor=#566573;" vertex="1" parent="ov-1">
+          <mxGeometry x="32" y="62" width="2100" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="ov-symbols" value="SYMBOLS AND DEFAULT NUMBERS&#xa;&#xa;B = batch size; default max_batch_size = 4&#xa;S = query sequence length; 1 for decode; up to 4096&#xa;D = model hidden width = 4096&#xa;H = query heads = 64&#xa;H_local = H / world_size = 64 (MP=1), 16 (MP=4)&#xa;Dh = attention head width = 512&#xa;R = rope_head_dim = 64; non-RoPE width = 448&#xa;G = output groups = 8; G_local = 8 (MP=1), 2 (MP=4)&#xa;OR = output low-rank width = 1024&#xa;W = sliding window = 128&#xa;K_index = 512 for learned indexer&#xa;T = QCAU tile_size = 64&#xa;eps = 1e-6; scale = 1/sqrt(Dh) = 0.04419417" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F4F6F7;strokeColor=#7B7D7D;strokeWidth=2;fontSize=14;fontColor=#17202A;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ov-1">
+          <mxGeometry x="30" y="125" width="350" height="405" as="geometry"/>
+        </mxCell>
+        <mxCell id="ov-input" value="INPUT FROM TRANSFORMER BLOCK&#xa;&#xa;x: [B,S,D] = [B,S,4096]&#xa;For model path, x arrives after Block.attn_norm.&#xa;&#xa;Weights and state:&#xa;wq_a [1024,4096]&#xa;wq_b [32768,1024] = [H*Dh,q_rank]&#xa;wkv [512,4096]&#xa;q_norm_weight [1024]&#xa;kv_norm_weight [512]&#xa;freqs_cis [max_seq_len,R/2] = [4096,32] complex&#xa;attn_sink [H_local]&#xa;topk_idxs [B,S,K_total]&#xa;KV cache [B,N,512]" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#D6EAF8;strokeColor=#2874A6;strokeWidth=2;fontSize=14;fontColor=#17202A;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ov-1">
+          <mxGeometry x="30" y="570" width="350" height="375" as="geometry"/>
+        </mxCell>
+        <mxCell id="ov-q" value="A. Q PREPROCESSING&#xa;&#xa;QCAU.py full mode:&#xa;1. q_low = x @ wq_a.T&#xa;2. q_low = RMSNorm(q_low)&#xa;3. q_flat = q_low @ wq_b.T&#xa;4. reshape [B,S,H_local,Dh]&#xa;5. per-head RMS-like normalization&#xa;6. RoPE on last R=64 dimensions&#xa;&#xa;Output q: [B,S,H_local,512]&#xa;&#xa;Model path performs the same operations in Attention.forward() before calling QCAU core." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#EAF2F8;strokeColor=#2874A6;strokeWidth=2;fontSize=14;fontColor=#17202A;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ov-1">
+          <mxGeometry x="470" y="155" width="375" height="365" as="geometry"/>
+        </mxCell>
+        <mxCell id="ov-kv" value="B. KV PREPROCESSING / CACHE / ADDRESS&#xa;&#xa;1. kv_current = x @ wkv.T&#xa;2. KV RMSNorm&#xa;3. RoPE on last R=64 dimensions&#xa;4. Write sliding-window cache&#xa;5. Optional Compressor writes compressed rows&#xa;6. Window or learned Indexer creates addresses&#xa;&#xa;QCAU input kv: [B,N,512]&#xa;topk_idxs: [B,S,K_total] with -1 invalid entries&#xa;&#xa;Compressor and Indexer live in model.py; QCAU.py has deterministic helper paths when topk is omitted." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDEDEC;strokeColor=#C0392B;strokeWidth=2;fontSize=14;fontColor=#17202A;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ov-1">
+          <mxGeometry x="470" y="590" width="375" height="355" as="geometry"/>
+        </mxCell>
+        <mxCell id="ov-core" value="C. QCAU SPARSE ATTENTION CORE&#xa;&#xa;For tile_base = 0, T, 2T, ...:&#xa;1. read topk index tile [B,S,T]&#xa;2. valid = 0 &lt;= idx &lt; N&#xa;3. clamp invalid indices for safe gather&#xa;4. gather KV tile [B,S,T,Dh]&#xa;5. QK dot product [B,S,H_local,T]&#xa;6. scale by 1/sqrt(Dh)&#xa;7. masked online softmax&#xa;8. weighted V accumulation&#xa;&#xa;State per [B,S,H_local]:&#xa;scores_max, sum_exp&#xa;State per [B,S,H_local,Dh]: acc_o" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FEF9E7;strokeColor=#B7950B;strokeWidth=3;fontSize=14;fontColor=#17202A;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ov-1">
+          <mxGeometry x="925" y="300" width="410" height="390" as="geometry"/>
+        </mxCell>
+        <mxCell id="ov-out" value="D. OUTPUT RESTORATION&#xa;&#xa;1. Add attention sink to denominator only&#xa;2. o = acc_o / final_sum_exp&#xa;3. inverse RoPE on output tail [R=64]&#xa;4. reshape into G_local output groups&#xa;5. wo_a: group width 4096 -&gt; OR=1024&#xa;6. flatten groups&#xa;7. wo_b: [G*OR] -&gt; D=4096&#xa;&#xa;QCAU standalone output: [B,S,D] when wo_a/wo_b are supplied.&#xa;Attention.forward() returns x: [B,S,4096] to the transformer block." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8F8F5;strokeColor=#148F77;strokeWidth=3;fontSize=14;fontColor=#17202A;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ov-1">
+          <mxGeometry x="1415" y="300" width="410" height="390" as="geometry"/>
+        </mxCell>
+        <mxCell id="ov-result" value="OUTPUT DESTINATION&#xa;&#xa;attention output x: [B,S,D] = [B,S,4096]&#xa;&#xa;In model.py this is returned from Attention.forward(), then passed to Hyper-Connections in Block.forward().&#xa;The QCAU core itself returns [B,S,H_local,Dh] before inverse RoPE and wo projection." style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#D5F5E3;strokeColor=#148F77;strokeWidth=2;fontSize=14;fontColor=#17202A;align=left;verticalAlign=middle;spacingTop=12;spacingLeft=14;" vertex="1" parent="ov-1">
+          <mxGeometry x="1905" y="425" width="340" height="215" as="geometry"/>
+        </mxCell>
+        <mxCell id="ov-note" value="IMPORTANT CODE BOUNDARY&#xa;&#xa;QCAU.py: self-contained PyTorch reference.&#xa;It contains projections, cache helper, address helper, sparse core and optional output projection.&#xa;&#xa;model.py Attention.forward(): actual model integration. It computes Q/KV, Compressor, Indexer, cache and topk_idxs, then calls QCAU(q, kv, attn_sink, topk_idxs).&#xa;&#xa;kernel.py: TileLang GPU implementation of sparse_attn. It is not the primary RTL golden model in this document." style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#FFF2CC;strokeColor=#D6B656;strokeWidth=2;fontSize=14;fontColor=#5D4037;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ov-1">
+          <mxGeometry x="1905" y="700" width="340" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="ov-e1" value="x [B,S,4096] + weights" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2874A6;strokeWidth=2;endArrow=block;" edge="1" parent="ov-1" source="ov-input" target="ov-q"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ov-e2" value="x [B,S,4096] + wkv [512,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C0392B;strokeWidth=2;endArrow=block;" edge="1" parent="ov-1" source="ov-input" target="ov-kv"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ov-e3" value="q [B,S,H_local,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2874A6;strokeWidth=2;endArrow=block;" edge="1" parent="ov-1" source="ov-q" target="ov-core"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ov-e4" value="kv [B,N,512] + topk_idxs [B,S,K_total]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C0392B;strokeWidth=2;endArrow=block;" edge="1" parent="ov-1" source="ov-kv" target="ov-core"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ov-e5" value="o [B,S,H_local,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#148F77;strokeWidth=2;endArrow=block;" edge="1" parent="ov-1" source="ov-core" target="ov-out"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ov-e6" value="x_out [B,S,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#148F77;strokeWidth=2;endArrow=block;" edge="1" parent="ov-1" source="ov-out" target="ov-result"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="qcau-detail-full" name="02_Full_QCAU_Python_Path">
+    <mxGraphModel dx="2600" dy="1500" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2800" pageHeight="2100" math="0" shadow="0">
+      <root>
+        <mxCell id="full-0"/>
+        <mxCell id="full-1" parent="full-0"/>
+        <mxCell id="full-title" value="QCAU.py EXACT FUNCTIONAL PATH" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=25;fontStyle=1;fontColor=#17202A;" vertex="1" parent="full-1">
+          <mxGeometry x="30" y="20" width="2200" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="full-sub" value="This page follows the current QCAU(c_q, w_uq, kv, topk_idxs, attn_sink, freqs_cis) interface. ACU, LIU and GOPU are outside this page." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=14;fontColor=#566573;" vertex="1" parent="full-1">
+          <mxGeometry x="32" y="62" width="2500" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="full-x" value="QCAU INPUT CONTRACT&#xa;&#xa;c_Q: [B,S,D_C]&#xa;Latent query from Query Down / LIU.&#xa;&#xa;kv: [B,N,Dh]&#xa;KV rows already prepared by ACU and selected/addressed by LIU.&#xa;&#xa;topk_idxs: [B,S,K]&#xa;Addresses into kv; invalid entries are -1.&#xa;&#xa;attn_sink: [H_local]&#xa;freqs_cis: full RoPE table or [S,R/2] slice&#xa;start_pos selects positions when a full table is supplied." style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#D6EAF8;strokeColor=#2874A6;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="full-1">
+          <mxGeometry x="30" y="180" width="390" height="340" as="geometry"/>
+        </mxCell>
+        <mxCell id="full-wqa" value="1. QUERY UP&#xa;&#xa;w_uq may be a tensor or callable projector.&#xa;&#xa;2D weight:&#xa;q_flat = c_Q @ W_UQ.T&#xa;&#xa;3D weight forms accepted:&#xa;[D_C,H,Dh] or [H,D_C,Dh]&#xa;&#xa;Output: [B,S,H_local*Dh] or [B,S,H_local,Dh]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#EAF2F8;strokeColor=#2874A6;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="full-1">
+          <mxGeometry x="500" y="180" width="390" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="full-qnorm" value="2. HEAD RESHAPE + RMSNORM&#xa;&#xa;q = unflatten(q_flat, [H_local,Dh])&#xa;&#xa;For the Flash configuration:&#xa;Dh = 512&#xa;H_local = 64 (MP=1) or 16 (MP=4)&#xa;&#xa;q[h] = q[h] / sqrt(mean(q[h]^2) + eps)&#xa;Optional q_head_norm_weight[H_local,Dh] is applied per head.&#xa;&#xa;Output q: [B,S,H_local,512]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5EEF8;strokeColor=#7D3C98;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="full-1">
+          <mxGeometry x="970" y="180" width="390" height="340" as="geometry"/>
+        </mxCell>
+        <mxCell id="full-wqb" value="3. QUERY RoPE (+position)&#xa;&#xa;Rotate only the final rope_head_dim values.&#xa;Default rope_head_dim = 64, giving 32 complex pairs.&#xa;&#xa;q_tail_rot = q_tail * freqs_cis[position]&#xa;&#xa;The first Dh - 64 values are unchanged.&#xa;If freqs_cis is full, use rows start_pos:start_pos+S.&#xa;&#xa;Output q_rot: [B,S,H_local,512]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5F5E3;strokeColor=#148F77;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="full-1">
+          <mxGeometry x="1440" y="180" width="390" height="340" as="geometry"/>
+        </mxCell>
+        <mxCell id="full-qreshape" value="4. CORE MQA + ONLINE SOFTMAX&#xa;&#xa;For tile_base = 0, T, 2T, ...:&#xa;1. Read topk_idxs tile [B,S,T].&#xa;2. valid = (idx &gt;= 0) &amp; (idx &lt; N).&#xa;3. Clamp only for safe KV gather.&#xa;4. Gather kv_tile [B,S,T,Dh].&#xa;5. QK dot product [B,S,H_local,T].&#xa;6. Scale by 1/sqrt(Dh).&#xa;7. Update running max, denominator and weighted-V state.&#xa;&#xa;The same KV row is broadcast to every query head (MQA). State is kept in FP32 in the reference." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FEF9E7;strokeColor=#B7950B;strokeWidth=3;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="full-1">
+          <mxGeometry x="1910" y="180" width="430" height="340" as="geometry"/>
+        </mxCell>
+        <mxCell id="full-qrope" value="5. ATTENTION SINK + OUTPUT&#xa;&#xa;After all KV tiles:&#xa;sink_term = exp(attn_sink - scores_max)&#xa;sink contributes to denominator only.&#xa;&#xa;o_core = acc_o / final_denominator&#xa;&#xa;Output before inverse RoPE:&#xa;[B,S,H_local,Dh]&#xa;&#xa;All-invalid addresses remain finite and produce zero value output when the sink is finite." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;strokeWidth=3;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="full-1">
+          <mxGeometry x="500" y="680" width="390" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="full-core" value="6. OUTPUT RoPE (-position)&#xa;&#xa;Apply the conjugate frequency to the final rope_head_dim values.&#xa;&#xa;o[..., -64:] = o_core[..., -64:] * freqs_cis[position].conj()&#xa;&#xa;The prefix remains unchanged.&#xa;&#xa;QCAU return value:&#xa;o [B,S,H_local,Dh]&#xa;&#xa;This is the interface to GOPU. QCAU does not perform wo_a, wo_b or all-reduce." style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#D5F5E3;strokeColor=#148F77;strokeWidth=3;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="full-1">
+          <mxGeometry x="970" y="680" width="430" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="full-inv" value="OUTSIDE QCAU&#xa;&#xa;ACU: creates and stores KV rows.&#xa;LIU: creates c_Q, scores compressed candidates and supplies topk_idxs.&#xa;GOPU: receives o and performs grouped output projection.&#xa;&#xa;QCAU.py does not receive x, does not build KV/cache/indexes and does not project o back to model width." style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#F4F6F7;strokeColor=#7B7D7D;fontSize=14;fontColor=#17202A;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="full-1">
+          <mxGeometry x="1480" y="680" width="520" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="full-e1" value="c_Q + W_UQ" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2874A6;strokeWidth=2;endArrow=block;" edge="1" parent="full-1" source="full-x" target="full-wqa"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="full-e2" value="q_flat" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2874A6;strokeWidth=2;endArrow=block;" edge="1" parent="full-1" source="full-wqa" target="full-qnorm"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="full-e3" value="q normalized" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2874A6;strokeWidth=2;endArrow=block;" edge="1" parent="full-1" source="full-qnorm" target="full-wqb"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="full-e4" value="q_rot + kv + topk_idxs + sink" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#148F77;strokeWidth=2;endArrow=block;" edge="1" parent="full-1" source="full-wqb" target="full-qreshape"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="full-e5" value="online attention output" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B7950B;strokeWidth=2;endArrow=block;" edge="1" parent="full-1" source="full-qreshape" target="full-qrope"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="full-e6" value="o_core" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#148F77;strokeWidth=2;endArrow=block;" edge="1" parent="full-1" source="full-qrope" target="full-core"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="qcau-detail-core" name="03_Attention_Core_One_Tile">
+    <mxGraphModel dx="2800" dy="1500" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3000" pageHeight="1700" math="0" shadow="0">
+      <root>
+        <mxCell id="core-0"/>
+        <mxCell id="core-1" parent="core-0"/>
+        <mxCell id="core-title" value="QCAU CORE: ONE ONLINE-ATTENTION TILE" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=25;fontStyle=1;fontColor=#17202A;" vertex="1" parent="core-1">
+          <mxGeometry x="30" y="20" width="1900" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="core-sub" value="Exact logical operations from _sparse_attention_online(). T is normally 64. The loop repeats for tile_base = 0,64,128,... until K_total is consumed." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=14;fontColor=#566573;" vertex="1" parent="core-1">
+          <mxGeometry x="32" y="62" width="2300" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="core-q" value="Q INPUT&#xa;&#xa;q [B,S,H,Dh]&#xa;default [B,S,64,512] MP=1&#xa;local [B,S,16,512] MP=4&#xa;&#xa;q_float = q.float()&#xa;Compute dtype: FP32 in reference" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#D6EAF8;strokeColor=#2874A6;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="core-1">
+          <mxGeometry x="30" y="190" width="310" height="235" as="geometry"/>
+        </mxCell>
+        <mxCell id="core-idx" value="INDEX TILE&#xa;&#xa;idxs = topk_idxs[..., tile_base:tile_base+T]&#xa;&#xa;topk_idxs [B,S,K_total]&#xa;tile_idxs [B,S,T]&#xa;T=64 except final partial tile&#xa;&#xa;Convert to torch.long on q device." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="core-1">
+          <mxGeometry x="30" y="535" width="310" height="235" as="geometry"/>
+        </mxCell>
+        <mxCell id="core-valid" value="VALIDITY CHECK&#xa;&#xa;valid = (tile_idxs &gt;= 0) &amp; (tile_idxs &lt; N)&#xa;&#xa;Shape: [B,S,T]&#xa;True means this address contributes.&#xa;False means invalid/future/out-of-range." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDEDEC;strokeColor=#C0392B;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="core-1">
+          <mxGeometry x="430" y="535" width="310" height="220" as="geometry"/>
+        </mxCell>
+        <mxCell id="core-safe" value="SAFE ADDRESS CLAMP&#xa;&#xa;safe_idxs = clamp(tile_idxs, 0, max(N-1,0))&#xa;&#xa;Shape: [B,S,T]&#xa;&#xa;Purpose: make gather memory-safe even for -1 or an out-of-range index. The valid mask later removes its numerical contribution." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5EEF8;strokeColor=#7D3C98;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="core-1">
+          <mxGeometry x="430" y="190" width="310" height="235" as="geometry"/>
+        </mxCell>
+        <mxCell id="core-expand" value="GATHER INDEX EXPAND&#xa;&#xa;gather_index = safe_idxs.unsqueeze(-1).expand(B,S,T,Dh)&#xa;&#xa;Shape: [B,S,T,512]&#xa;The same row address is replicated across all Dh=512 value lanes." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#EAF2F8;strokeColor=#2874A6;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="core-1">
+          <mxGeometry x="830" y="190" width="310" height="235" as="geometry"/>
+        </mxCell>
+        <mxCell id="core-gather" value="KV TILE GATHER&#xa;&#xa;kv_float [B,N,512]&#xa;torch.gather along dimension 1 using gather_index&#xa;&#xa;Initial gather result reshaped:&#xa;[B,S*T,512] -&gt; [B,S,T,512]&#xa;&#xa;kv_tile = where(valid[...,None], kv_tile, 0)&#xa;Invalid rows become zero vectors." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5F5E3;strokeColor=#148F77;strokeWidth=3;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="core-1">
+          <mxGeometry x="1230" y="190" width="350" height="275" as="geometry"/>
+        </mxCell>
+        <mxCell id="core-dot" value="QK DOT PRODUCT&#xa;&#xa;scores = einsum bshd,bstd-&gt;bsht(q_float, kv_tile)&#xa;&#xa;Input q: [B,S,H,512]&#xa;Input kv_tile: [B,S,T,512]&#xa;Output scores: [B,S,H,T]&#xa;&#xa;For every b,s,h,t:&#xa;dot = sum d=0..511 q[b,s,h,d] * kv_tile[b,s,t,d]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FEF9E7;strokeColor=#B7950B;strokeWidth=3;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="core-1">
+          <mxGeometry x="1680" y="190" width="350" height="275" as="geometry"/>
+        </mxCell>
+        <mxCell id="core-scale" value="SCALE + MASK&#xa;&#xa;scores *= softmax_scale&#xa;default softmax_scale = Dh^(-1/2)&#xa;for Dh=512: 0.0441941738&#xa;&#xa;scores = where(valid.unsqueeze(2), scores, -inf)&#xa;&#xa;Output masked scores: [B,S,H,T]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="core-1">
+          <mxGeometry x="2130" y="190" width="350" height="275" as="geometry"/>
+        </mxCell>
+        <mxCell id="core-state" value="RUNNING STATE BEFORE TILE&#xa;&#xa;scores_max_prev [B,S,H] = -inf initially&#xa;sum_exp [B,S,H] = 0 initially&#xa;acc_o [B,S,H,512] = 0 initially&#xa;&#xa;All three are FP32 in QCAU.py.&#xa;They persist across tile iterations for the same batch/query/head." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F4F6F7;strokeColor=#7B7D7D;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="core-1">
+          <mxGeometry x="830" y="600" width="310" height="245" as="geometry"/>
+        </mxCell>
+        <mxCell id="core-next" value="TILE REDUCTION OUTPUTS&#xa;&#xa;tile_has_valid = any(valid,-1)&#xa;tile_max = amax(scores,-1) [B,S,H]&#xa;next_scores_max = maximum(prev,tile_max)&#xa;&#xa;If tile has no valid index, keep previous max and use old_scale=1. This prevents -inf - -inf NaN." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDEDEC;strokeColor=#C0392B;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="core-1">
+          <mxGeometry x="1230" y="600" width="350" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="core-nextout" value="TO ONLINE SOFTMAX STAGE&#xa;&#xa;masked scores [B,S,H,T]&#xa;valid [B,S,T]&#xa;tile_max [B,S,H]&#xa;previous state [m,l,o]&#xa;&#xa;The next page expands the exact recurrence and weighted-V update." style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#D5F5E3;strokeColor=#148F77;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="core-1">
+          <mxGeometry x="1680" y="600" width="350" height="245" as="geometry"/>
+        </mxCell>
+        <mxCell id="core-note" value="RTL interpretation&#xa;&#xa;T=64 rows per tile. Each row is Dh=512 values.&#xa;QK engine can use 512 MAC lanes, time-multiplexed MACs, or a systolic reduction.&#xa;The Python operation is a logical contract; it does not prescribe the physical PE count." style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#FFF2CC;strokeColor=#D6B656;strokeWidth=2;fontSize=14;fontColor=#5D4037;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="core-1">
+          <mxGeometry x="2130" y="600" width="350" height="245" as="geometry"/>
+        </mxCell>
+        <mxCell id="core-e1" value="tile_idxs [B,S,T]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B7950B;strokeWidth=2;endArrow=block;" edge="1" parent="core-1" source="core-idx" target="core-valid"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="core-e2" value="idx [B,S,T]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B7950B;strokeWidth=2;endArrow=block;" edge="1" parent="core-1" source="core-idx" target="core-safe"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="core-e3" value="safe_idxs [B,S,T]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#7D3C98;strokeWidth=2;endArrow=block;" edge="1" parent="core-1" source="core-safe" target="core-expand"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="core-e4" value="index [B,S,T,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2874A6;strokeWidth=2;endArrow=block;" edge="1" parent="core-1" source="core-expand" target="core-gather"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="core-e5" value="kv_tile [B,S,T,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#148F77;strokeWidth=2;endArrow=block;" edge="1" parent="core-1" source="core-gather" target="core-dot"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="core-e6" value="valid mask [B,S,T]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C0392B;strokeWidth=2;endArrow=block;" edge="1" parent="core-1" source="core-valid" target="core-scale"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="core-e7" value="raw scores [B,S,H,T]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B7950B;strokeWidth=2;endArrow=block;" edge="1" parent="core-1" source="core-dot" target="core-scale"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="core-e8" value="masked scores [B,S,H,T] + tile_max [B,S,H]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B7950B;strokeWidth=2;endArrow=block;" edge="1" parent="core-1" source="core-scale" target="core-next"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="core-e9" value="m,l,o state [B,S,H], [B,S,H], [B,S,H,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#7B7D7D;strokeWidth=2;endArrow=block;" edge="1" parent="core-1" source="core-state" target="core-next"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="core-e10" value="score tile + valid + state" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#148F77;strokeWidth=2;endArrow=block;" edge="1" parent="core-1" source="core-next" target="core-nextout"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="qcau-detail-softmax" name="04_Online_Softmax_and_Weighted_V">
+    <mxGraphModel dx="3000" dy="1700" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3200" pageHeight="1900" math="0" shadow="0">
+      <root>
+        <mxCell id="os-0"/>
+        <mxCell id="os-1" parent="os-0"/>
+        <mxCell id="os-title" value="ONLINE SOFTMAX, ATTENTION SINK AND WEIGHTED-V ACCUMULATION" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=25;fontStyle=1;fontColor=#17202A;" vertex="1" parent="os-1">
+          <mxGeometry x="30" y="20" width="2300" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="os-sub" value="The algorithm never creates a [B,S,H,K_total] attention matrix in memory. It streams one tile and maintains running state." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=14;fontColor=#566573;" vertex="1" parent="os-1">
+          <mxGeometry x="32" y="62" width="2400" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="os-init" value="INITIAL STATE BEFORE TILE LOOP&#xa;&#xa;m_0 = scores_max = -inf&#xa;Shape [B,S,H]&#xa;&#xa;l_0 = sum_exp = 0&#xa;Shape [B,S,H]&#xa;&#xa;o_0 = acc_o = zero&#xa;Shape [B,S,H,Dh] = [B,S,H,512]&#xa;&#xa;All state tensors are FP32." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F4F6F7;strokeColor=#7B7D7D;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="os-1">
+          <mxGeometry x="30" y="160" width="350" height="285" as="geometry"/>
+        </mxCell>
+        <mxCell id="os-max" value="1. TILE MAXIMUM AND NEW MAX&#xa;&#xa;tile_has_valid = any(valid, dim=-1)&#xa;Shape [B,S,1]&#xa;&#xa;tile_max = amax(scores, dim=-1)&#xa;Shape [B,S,H]&#xa;&#xa;m_new_candidate = maximum(m_old,tile_max)&#xa;&#xa;m_new = where(tile_has_valid, candidate, m_old)&#xa;&#xa;For all-invalid tile, m does not change." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDEDEC;strokeColor=#C0392B;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="os-1">
+          <mxGeometry x="450" y="160" width="390" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="os-rescale" value="2. OLD MASS RESCALE&#xa;&#xa;old_scale = exp(m_old - m_new)&#xa;Shape [B,S,H]&#xa;&#xa;If tile_has_valid=False: old_scale=1.&#xa;&#xa;This converts old accumulators from the old exponent origin to the new exponent origin before adding this tile." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5EEF8;strokeColor=#7D3C98;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="os-1">
+          <mxGeometry x="910" y="160" width="350" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="os-prob" value="3. TILE EXPONENTIAL WEIGHTS&#xa;&#xa;safe_m = where(isfinite(m_new),m_new,0)&#xa;p = exp(scores - safe_m[...,None])&#xa;p = where(valid[...,None],p,0)&#xa;&#xa;p shape [B,S,H,T]&#xa;Invalid scores are exactly zero probability.&#xa;When the first valid tile arrives after invalid tiles, safe_m avoids -inf - -inf." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FEF9E7;strokeColor=#B7950B;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="os-1">
+          <mxGeometry x="1330" y="160" width="390" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="os-l" value="4. NORMALIZATION MASS UPDATE&#xa;&#xa;l_new = l_old * old_scale + sum(p, dim=-1)&#xa;&#xa;l_old, l_new shape [B,S,H]&#xa;sum(p,-1) shape [B,S,H]&#xa;&#xa;This is the denominator contribution from real KV entries only. Sink is added after the tile loop." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#EAF2F8;strokeColor=#2874A6;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="os-1">
+          <mxGeometry x="1790" y="160" width="350" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="os-o" value="5. WEIGHTED-V UPDATE&#xa;&#xa;o_new = o_old * old_scale + einsum(p,kv_tile)&#xa;&#xa;p [B,S,H,T]&#xa;kv_tile [B,S,T,Dh]&#xa;output o [B,S,H,Dh] = [B,S,H,512]&#xa;&#xa;For each output lane d:&#xa;sum over t=0..T-1 p[b,s,h,t] * kv_tile[b,s,t,d]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5F5E3;strokeColor=#148F77;strokeWidth=3;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="os-1">
+          <mxGeometry x="2210" y="160" width="390" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="os-loop" value="TILE LOOP CONTROL&#xa;&#xa;tile_base = 0,64,128,...,K_total-1&#xa;tile_idxs = idxs[...,tile_base:tile_base+64]&#xa;&#xa;The state [m,l,o] from this row becomes the state input to the next tile.&#xa;For K_total=128, two tiles.&#xa;For K_total=512, eight tiles.&#xa;For K_total=640, ten tiles." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F4F6F7;strokeColor=#7B7D7D;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="os-1">
+          <mxGeometry x="30" y="610" width="350" height="250" as="geometry"/>
+        </mxCell>
+        <mxCell id="os-sink" value="6. ATTENTION SINK AFTER ALL KV TILES&#xa;&#xa;sink = attn_sink.view(1,1,H)&#xa;Shape [1,1,H]&#xa;&#xa;If m is finite: sink_term = exp(sink - m)&#xa;If m=-inf and sink finite: sink_term = 1&#xa;If m=-inf and sink=-inf: sink_term = 0&#xa;&#xa;Sink contributes to denominator only; it has no V vector." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;strokeWidth=3;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="os-1">
+          <mxGeometry x="450" y="610" width="390" height="285" as="geometry"/>
+        </mxCell>
+        <mxCell id="os-finalmass" value="7. FINAL NORMALIZATION&#xa;&#xa;l_final = l_after_tiles + sink_term&#xa;Shape [B,S,H]&#xa;&#xa;den = clamp_min(l_final, tiny_FP32)&#xa;&#xa;The clamp protects the divide from zero when every address is invalid and sink is -inf." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5EEF8;strokeColor=#7D3C98;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="os-1">
+          <mxGeometry x="910" y="610" width="350" height="250" as="geometry"/>
+        </mxCell>
+        <mxCell id="os-out" value="8. CORE OUTPUT&#xa;&#xa;out = acc_o / den.unsqueeze(-1)&#xa;&#xa;acc_o [B,S,H,Dh]&#xa;den [B,S,H]&#xa;broadcast den to [B,S,H,1]&#xa;&#xa;Return cast to q.dtype.&#xa;Output: [B,S,H_local,512]&#xa;&#xa;All-invalid row with finite sink: acc_o=0, den=1, output=0.&#xa;All-invalid row with sink=-inf: acc_o=0, den=tiny, output=0." style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#D5F5E3;strokeColor=#148F77;strokeWidth=3;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="os-1">
+          <mxGeometry x="1330" y="610" width="390" height="285" as="geometry"/>
+        </mxCell>
+        <mxCell id="os-check" value="NUMERICAL CONTRACT&#xa;&#xa;The reference accumulates m, l and o in FP32.&#xa;It avoids materializing probability matrices beyond one tile.&#xa;The exact RTL implementation may approximate exp, reciprocal and reduction, but must preserve this logical recurrence and valid-mask behavior." style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#FFF2CC;strokeColor=#D6B656;strokeWidth=2;fontSize=14;fontColor=#5D4037;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="os-1">
+          <mxGeometry x="1790" y="610" width="430" height="285" as="geometry"/>
+        </mxCell>
+        <mxCell id="os-e1" value="m0,l0,o0" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#7B7D7D;strokeWidth=2;endArrow=block;" edge="1" parent="os-1" source="os-init" target="os-max"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="os-e2" value="m_old [B,S,H], tile_max [B,S,H]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C0392B;strokeWidth=2;endArrow=block;" edge="1" parent="os-1" source="os-max" target="os-rescale"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="os-e3" value="m_old,m_new [B,S,H]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#7D3C98;strokeWidth=2;endArrow=block;" edge="1" parent="os-1" source="os-rescale" target="os-prob"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="os-e4" value="p [B,S,H,T]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B7950B;strokeWidth=2;endArrow=block;" edge="1" parent="os-1" source="os-prob" target="os-l"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="os-e5" value="p + kv_tile + old_scale" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#148F77;strokeWidth=2;endArrow=block;" edge="1" parent="os-1" source="os-prob" target="os-o"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="os-e6" value="l_new [B,S,H]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2874A6;strokeWidth=2;endArrow=block;" edge="1" parent="os-1" source="os-l" target="os-finalmass"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="os-e7" value="o_new [B,S,H,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#148F77;strokeWidth=2;endArrow=block;" edge="1" parent="os-1" source="os-o" target="os-out"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="os-e8" value="attn_sink [H]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B7950B;strokeWidth=2;endArrow=block;" edge="1" parent="os-1" source="os-sink" target="os-finalmass"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="os-e9" value="sink_term [B,S,H]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#7D3C98;strokeWidth=2;endArrow=block;" edge="1" parent="os-1" source="os-finalmass" target="os-out"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="os-e10" value="repeat state per tile" style="dashed=1;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#7B7D7D;strokeWidth=1;endArrow=open;" edge="1" parent="os-1" source="os-out" target="os-loop"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="qcau-detail-output" name="05_Output_RoPE_and_Grouped_Projection">
+    <mxGraphModel dx="2700" dy="1500" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2900" pageHeight="1700" math="0" shadow="0">
+      <root>
+        <mxCell id="op-0"/>
+        <mxCell id="op-1" parent="op-0"/>
+        <mxCell id="op-title" value="OUTPUT SIDE: INVERSE RoPE, GROUPED wo_a AND wo_b" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=25;fontStyle=1;fontColor=#17202A;" vertex="1" parent="op-1">
+          <mxGeometry x="30" y="20" width="2000" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="op-sub" value="The core output is still per query head. This page shows how it becomes the model hidden width D=4096." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=14;fontColor=#566573;" vertex="1" parent="op-1">
+          <mxGeometry x="32" y="62" width="2200" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="op-in" value="QCAU CORE OUTPUT&#xa;&#xa;o_core [B,S,H_local,Dh]&#xa;MP=1: [B,S,64,512]&#xa;MP=4: [B,S,16,512]&#xa;&#xa;dtype returned by QCAU is q.dtype; running attention state was FP32." style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#FEF9E7;strokeColor=#B7950B;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="op-1">
+          <mxGeometry x="30" y="235" width="340" height="230" as="geometry"/>
+        </mxCell>
+        <mxCell id="op-inv" value="INVERSE RoPE&#xa;&#xa;Apply conjugate frequency to last R=64 values of each head.&#xa;&#xa;Tail [B,S,H_local,64] -&gt; 32 complex values/head.&#xa;prefix [B,S,H_local,448] copied unchanged.&#xa;&#xa;o_derot [B,S,H_local,512]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5F5E3;strokeColor=#148F77;strokeWidth=3;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="op-1">
+          <mxGeometry x="470" y="210" width="360" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="op-view" value="GROUP VIEW / HEAD CONCATENATION&#xa;&#xa;o_grouped = o.view(B,S,G_local,-1)&#xa;&#xa;Group width = H_local*Dh/G_local.&#xa;MP=1: 64*512/8 = 4096.&#xa;MP=4: 16*512/2 = 4096.&#xa;&#xa;Output shape:&#xa;MP=1 [B,S,8,4096]&#xa;MP=4 [B,S,2,4096]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#EAF2F8;strokeColor=#2874A6;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="op-1">
+          <mxGeometry x="930" y="210" width="360" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="op-woa" value="wo_a GROUPED LOW-RANK PROJECTION&#xa;&#xa;Global logical weight: [G*OR, H*Dh/G]&#xa;= [8192,4096].&#xa;&#xa;Model local view: [G_local,OR,4096]&#xa;MP=1: [8,1024,4096]&#xa;MP=4: [2,1024,4096].&#xa;&#xa;einsum bsgd,grd-&gt;bsgr&#xa;[B,S,G_local,4096] x [G_local,1024,4096]&#xa;-&gt; [B,S,G_local,1024]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D6EAF8;strokeColor=#2874A6;strokeWidth=3;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="op-1">
+          <mxGeometry x="1390" y="185" width="400" height="320" as="geometry"/>
+        </mxCell>
+        <mxCell id="op-flat" value="GROUP FLATTEN&#xa;&#xa;o_lowrank.flatten(2)&#xa;&#xa;MP=1: [B,S,8,1024] -&gt; [B,S,8192]&#xa;MP=4: [B,S,2,1024] -&gt; [B,S,2048] local&#xa;&#xa;The local MP=4 result is the input shard for RowParallelLinear wo_b." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5EEF8;strokeColor=#7D3C98;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="op-1">
+          <mxGeometry x="1890" y="210" width="360" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="op-wob" value="wo_b ROW-PARALLEL LINEAR&#xa;&#xa;Global logical weight [D,G*OR]&#xa;= [4096,8192].&#xa;&#xa;MP=1: input [B,S,8192] -&gt; output [B,S,4096].&#xa;MP=4: local weight [4096,2048], local output [B,S,4096], then all_reduce across 4 ranks.&#xa;&#xa;This restores model hidden width D=4096." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5F5E3;strokeColor=#148F77;strokeWidth=3;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="op-1">
+          <mxGeometry x="2350" y="210" width="400" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="op-out" value="OUTPUT TO BLOCK&#xa;&#xa;x_attn [B,S,D] = [B,S,4096]&#xa;&#xa;In Attention.forward(): returned to Block.forward().&#xa;Block then performs hc_pre, ffn_norm, MoE, hc_post and residual mixing." style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#D5F5E3;strokeColor=#148F77;strokeWidth=2;fontSize=14;align=left;verticalAlign=middle;spacingTop=12;spacingLeft=14;" vertex="1" parent="op-1">
+          <mxGeometry x="2350" y="650" width="400" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="op-formula" value="SHAPE INVARIANT&#xa;&#xa;H_local * Dh = G_local * (H_local*Dh/G_local)&#xa;&#xa;MP=1: 64*512 = 8*4096 = 32768.&#xa;MP=4: 16*512 = 2*4096 = 8192 local.&#xa;&#xa;This invariant is required for the reshape before wo_a.&#xa;For standalone QCAU on MP=4, pass n_local_groups=2 (or n_groups=2) explicitly; model.py already uses self.n_local_groups." style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#FFF2CC;strokeColor=#D6B656;strokeWidth=2;fontSize=14;fontColor=#5D4037;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="op-1">
+          <mxGeometry x="30" y="650" width="410" height="240" as="geometry"/>
+        </mxCell>
+        <mxCell id="op-code" value="CODE LOCATIONS&#xa;&#xa;model.py Attention.forward():&#xa;apply_rotary_emb(o[..., -rd:], freqs_cis, True)&#xa;o.view(bsz,seqlen,n_local_groups,-1)&#xa;wo_a.view(n_local_groups,o_lora_rank,-1)&#xa;einsum bsgd,grd-&gt;bsgr&#xa;wo_b(o.flatten(2))&#xa;&#xa;QCAU.py standalone mode contains the same logical stages when wo_a/wo_b are passed." style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#F4F6F7;strokeColor=#7B7D7D;strokeWidth=2;fontSize=14;fontColor=#17202A;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="op-1">
+          <mxGeometry x="930" y="650" width="620" height="250" as="geometry"/>
+        </mxCell>
+        <mxCell id="op-e1" value="o_core [B,S,H_local,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B7950B;strokeWidth=2;endArrow=block;" edge="1" parent="op-1" source="op-in" target="op-inv"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="op-e2" value="o_derot [B,S,H_local,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#148F77;strokeWidth=2;endArrow=block;" edge="1" parent="op-1" source="op-inv" target="op-view"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="op-e3" value="o_grouped [B,S,G_local,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2874A6;strokeWidth=2;endArrow=block;" edge="1" parent="op-1" source="op-view" target="op-woa"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="op-e4" value="o_lowrank [B,S,G_local,1024]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2874A6;strokeWidth=2;endArrow=block;" edge="1" parent="op-1" source="op-woa" target="op-flat"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="op-e5" value="flat [B,S,G_local*1024]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#7D3C98;strokeWidth=2;endArrow=block;" edge="1" parent="op-1" source="op-flat" target="op-wob"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="op-e6" value="x_attn [B,S,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#148F77;strokeWidth=2;endArrow=block;" edge="1" parent="op-1" source="op-wob" target="op-out"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="qcau-detail-timeline" name="06_Prefill_Decode_Timeline">
+    <mxGraphModel dx="2800" dy="1600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3000" pageHeight="1800" math="0" shadow="0">
+      <root>
+        <mxCell id="tl-0"/>
+        <mxCell id="tl-1" parent="tl-0"/>
+        <mxCell id="tl-title" value="PREFILL VS DECODE: DATAFLOW OVER TIME" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=25;fontStyle=1;fontColor=#17202A;" vertex="1" parent="tl-1">
+          <mxGeometry x="30" y="20" width="1900" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="tl-sub" value="The QCAU core is the same; S, cache writes, legal addresses and compressed-state updates change between prefill and decode." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=14;fontColor=#566573;" vertex="1" parent="tl-1">
+          <mxGeometry x="32" y="62" width="2200" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="tl-prefill" value="PREFILL PHASE&#xa;&#xa;Call: model(input_ids[:, :S], start_pos=0)&#xa;&#xa;1. Input x [B,S,4096].&#xa;2. Produce q [B,S,H_local,512].&#xa;3. Produce kv_current [B,S,512].&#xa;4. Fill window cache for current tokens.&#xa;5. If compression: compressor may emit S_c compressed rows.&#xa;6. Build topk_idxs per query row.&#xa;7. QCAU loops over S queries and K_total addresses.&#xa;8. Output o [B,S,H_local,512].&#xa;9. Output projection returns [B,S,4096].&#xa;&#xa;For logits, Transformer.head consumes the last sequence row later." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#EAF2F8;strokeColor=#2874A6;strokeWidth=3;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="tl-1">
+          <mxGeometry x="30" y="155" width="470" height="430" as="geometry"/>
+        </mxCell>
+        <mxCell id="tl-prefill-cache" value="PREFILL CACHE STATE AFTER CALL&#xa;&#xa;Window cache: [B,W,512] valid rows depend on S.&#xa;Compressed cache if active: [B,N_c,512] rows at logical offset W.&#xa;&#xa;For ratio=4 and S=8:&#xa;current rows [B,8,512]&#xa;compressed rows approximately [B,2,512]&#xa;prefill QCAU kv can be [B,10,512]&#xa;decode cache layout remains [B,1152,512]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5EEF8;strokeColor=#7D3C98;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="tl-1">
+          <mxGeometry x="30" y="665" width="470" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="tl-decode" value="DECODE PHASE, ONE TOKEN&#xa;&#xa;Call: model(input_ids[:,p:p+1], start_pos=p)&#xa;&#xa;1. Input x [B,1,4096].&#xa;2. Produce q [B,1,H_local,512].&#xa;3. Produce kv_current [B,1,512].&#xa;4. Write window slot p % 128.&#xa;5. If compression active, update incremental compressor state.&#xa;6. If (p+1) % ratio == 0, emit compressed row.&#xa;7. Build topk_idxs [B,1,K_total].&#xa;8. QCAU processes one query row.&#xa;9. Output projection returns [B,1,4096].&#xa;&#xa;The next decode step reuses the updated cache and state." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDEDEC;strokeColor=#C0392B;strokeWidth=3;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="tl-1">
+          <mxGeometry x="610" y="155" width="470" height="430" as="geometry"/>
+        </mxCell>
+        <mxCell id="tl-decode-cache" value="DECODE ADDRESS EXAMPLE, W=128&#xa;&#xa;p=0: valid window addresses 0; rest -1.&#xa;p=1: valid addresses 0,1; rest -1.&#xa;p=127: addresses 0..127.&#xa;p=128: circular address order starts at 1 and wraps through 0.&#xa;&#xa;For compressed ratio=4: compressed physical addresses begin at 128.&#xa;Indexer selected j becomes address 128+j.&#xa;&#xa;All invalid addresses remain in the packet with valid=False." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="tl-1">
+          <mxGeometry x="610" y="665" width="470" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="tl-compare" value="SAME QCAU CORE CONTRACT IN BOTH MODES&#xa;&#xa;q [B,S,H_local,512]&#xa;kv [B,N,512]&#xa;topk_idxs [B,S,K_total]&#xa;sink [H_local]&#xa;&#xa;For each query row and tile:&#xa;safe gather -&gt; QK score -&gt; scale/mask -&gt; online m,l,o update -&gt; sink -&gt; normalize.&#xa;&#xa;The only difference is how q, kv and topk_idxs are prepared and how cache state is updated." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5F5E3;strokeColor=#148F77;strokeWidth=3;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="tl-1">
+          <mxGeometry x="1190" y="280" width="480" height="350" as="geometry"/>
+        </mxCell>
+        <mxCell id="tl-state" value="STATE THAT PERSISTS BETWEEN DECODE CALLS&#xa;&#xa;Attention.kv_cache [B,N_cache,512].&#xa;Compressor.kv_state and score_state for unfinished groups.&#xa;Indexer compressed KV cache [B,N_c,128] when ratio=4.&#xa;Transformer position p supplied by generate.py.&#xa;&#xa;QCAU running state m,l,o does not persist across calls; it is reinitialized for each query row." style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#FFF2CC;strokeColor=#D6B656;strokeWidth=2;fontSize=14;fontColor=#5D4037;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="tl-1">
+          <mxGeometry x="1190" y="700" width="480" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="tl-output" value="OUTPUT TO GENERATION&#xa;&#xa;Attention output after wo_b:&#xa;prefill [B,S,4096]&#xa;decode [B,1,4096]&#xa;&#xa;Transformer head selects x[:, -1] and produces logits [B,vocab_size].&#xa;generate.py samples/argmaxes the next token and invokes the next decode position." style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#D6EAF8;strokeColor=#2874A6;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="tl-1">
+          <mxGeometry x="1780" y="280" width="450" height="315" as="geometry"/>
+        </mxCell>
+        <mxCell id="tl-limit" value="IMPORTANT LIMIT&#xa;&#xa;QCAU.py itself does not own the learned Compressor or Indexer state. Those modules live in model.py and feed QCAU. The QCAU standalone helper can create deterministic window/compressed indices if topk_idxs is omitted, but this is not the learned ratio=4 Indexer path." style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#F4F6F7;strokeColor=#7B7D7D;strokeWidth=2;fontSize=14;fontColor=#17202A;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="tl-1">
+          <mxGeometry x="1780" y="700" width="450" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="tl-e1" value="prefill [B,S,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2874A6;strokeWidth=2;endArrow=block;" edge="1" parent="tl-1" source="tl-prefill" target="tl-prefill-cache"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="tl-e2" value="decode [B,1,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C0392B;strokeWidth=2;endArrow=block;" edge="1" parent="tl-1" source="tl-decode" target="tl-decode-cache"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="tl-e3" value="prepared q,kv,topk" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#148F77;strokeWidth=2;endArrow=block;" edge="1" parent="tl-1" source="tl-prefill" target="tl-compare"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="tl-e4" value="prepared q,kv,topk" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#148F77;strokeWidth=2;endArrow=block;" edge="1" parent="tl-1" source="tl-decode" target="tl-compare"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="tl-e5" value="o -&gt; wo_a -&gt; wo_b" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#148F77;strokeWidth=2;endArrow=block;" edge="1" parent="tl-1" source="tl-compare" target="tl-output"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="qcau-detail-shapes" name="07_Shape_Table_and_RTL_Map">
+    <mxGraphModel dx="3000" dy="1800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3200" pageHeight="2000" math="0" shadow="0">
+      <root>
+        <mxCell id="st-0"/>
+        <mxCell id="st-1" parent="st-0"/>
+        <mxCell id="st-title" value="SHAPE TABLE, DATA TYPES AND RTL DECOMPOSITION MAP" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=25;fontStyle=1;fontColor=#17202A;" vertex="1" parent="st-1">
+          <mxGeometry x="30" y="20" width="2200" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="st-sub" value="Use this page as the checklist when converting the reference dataflow into SRAM interfaces, PE arrays, control FSMs and numerical approximation blocks." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=14;fontColor=#566573;" vertex="1" parent="st-1">
+          <mxGeometry x="32" y="62" width="2450" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="st-symbols" value="CONFIGURATION TABLE&#xa;&#xa;D=4096 hidden width&#xa;q_lora_rank=1024&#xa;H=64 query heads&#xa;Dh=512 values/head&#xa;R=64 RoPE tail&#xa;D_nope=448&#xa;G=8 output groups&#xa;OR=1024 group output rank&#xa;W=128 window length&#xa;max_seq_len=4096&#xa;index_n_heads=64&#xa;index_head_dim=128&#xa;index_topk=512&#xa;default tile_size=64&#xa;&#xa;MP examples:&#xa;world_size=1: H_local=64,G_local=8&#xa;world_size=4: H_local=16,G_local=2" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F4F6F7;strokeColor=#7B7D7D;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="st-1">
+          <mxGeometry x="30" y="145" width="330" height="390" as="geometry"/>
+        </mxCell>
+        <mxCell id="st-tensors" value="TENSOR INTERFACE TABLE&#xa;&#xa;x [B,S,4096] input hidden state&#xa;q_low [B,S,1024] low-rank query&#xa;q [B,S,H_local,512] query heads&#xa;kv [B,N,512] shared latent KV rows&#xa;topk_idxs [B,S,K_total] int32 addresses&#xa;valid [B,S,T] boolean mask&#xa;kv_tile [B,S,T,512] gathered tile&#xa;scores [B,S,H_local,T] scaled QK scores&#xa;m/l [B,S,H_local] FP32 running max/sum&#xa;acc_o [B,S,H_local,512] FP32 weighted values&#xa;o [B,S,H_local,512] core output&#xa;o_grouped [B,S,G_local,4096] grouped heads&#xa;o_lowrank [B,S,G_local,1024] after wo_a&#xa;x_out [B,S,4096] output hidden state" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#EAF2F8;strokeColor=#2874A6;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="st-1">
+          <mxGeometry x="420" y="145" width="390" height="390" as="geometry"/>
+        </mxCell>
+        <mxCell id="st-dtypes" value="REFERENCE DATA TYPES&#xa;&#xa;QCAU receives q and kv in model activation dtype, normally BF16 in the working fallback path.&#xa;&#xa;_sparse_attention_online immediately creates q_float and kv_float in FP32.&#xa;&#xa;acc_o, sum_exp and scores_max are FP32.&#xa;&#xa;Output is cast back to q.dtype.&#xa;&#xa;The native TileLang kernel declares BF16 q/kv/output and FP32 attention state. An RTL design may choose BF16, FP16 or fixed point, but must document rounding and saturation." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDEDEC;strokeColor=#C0392B;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="st-1">
+          <mxGeometry x="870" y="145" width="390" height="390" as="geometry"/>
+        </mxCell>
+        <mxCell id="st-rtl" value="RTL BLOCKS TO DRAW&#xa;&#xa;1. Input/token stream and start_pos control&#xa;2. Q low-rank GEMM 4096x1024&#xa;3. Q expansion GEMM 1024x32768&#xa;4. Q RMS / per-head norm&#xa;5. Q RoPE complex pair rotator&#xa;6. KV GEMM 4096x512&#xa;7. KV RMS / KV RoPE&#xa;8. Window/compressed KV SRAM controller&#xa;9. Address SRAM and valid-mask generator&#xa;10. KV gather/burst buffer, T x 512&#xa;11. QK MAC/reduction engine, H x T scores&#xa;12. scale, -inf mask and exp approximation&#xa;13. running max and rescale FSM&#xa;14. weighted-V MAC and FP32 accumulator&#xa;15. sink denominator injection&#xa;16. reciprocal / output normalization&#xa;17. inverse RoPE&#xa;18. grouped wo_a GEMM/einsum&#xa;19. wo_b row-parallel GEMM/all-reduce" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FEF9E7;strokeColor=#B7950B;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="st-1">
+          <mxGeometry x="1320" y="145" width="430" height="460" as="geometry"/>
+        </mxCell>
+        <mxCell id="st-invariants" value="MUST-HOLD INVARIANTS&#xa;&#xa;1. q.size(-1) == kv.size(-1) == Dh.&#xa;2. q.shape[1] == topk_idxs.shape[1].&#xa;3. batch dimensions agree.&#xa;4. attn_sink has H_local values.&#xa;5. invalid addresses never contribute to score, sum or weighted V.&#xa;6. all-invalid tile is a no-op.&#xa;7. all-invalid row produces finite zero output.&#xa;8. group reshape preserves H_local*Dh.&#xa;9. wo_a group width is H_local*Dh/G_local.&#xa;10. decode cache write uses start_pos % W.&#xa;11. ratio=4 compressed addresses use offset W in decode.&#xa;12. inverse RoPE uses conjugate coefficient." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5F5E3;strokeColor=#148F77;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="st-1">
+          <mxGeometry x="1810" y="145" width="430" height="390" as="geometry"/>
+        </mxCell>
+        <mxCell id="st-tests" value="VERIFICATION CHECKLIST COMPLETED FOR THE REFERENCE&#xa;&#xa;Core vs torch.softmax reference: max abs error about 2.4e-7.&#xa;Tile sizes 1,4,64: equivalent within numerical tolerance.&#xa;Invalid -1 and out-of-range indices: masked and finite.&#xa;Entirely invalid tile: no NaN.&#xa;Full QCAU path with projections/RoPE/wo_a/wo_b: finite and correct shape.&#xa;CPU model prefill/decode: pass.&#xa;GPU model prefill/decode: pass.&#xa;Compressed ratio=4 GPU path: pass.&#xa;&#xa;This establishes a functional golden model, not cycle-accurate RTL." style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#FFF2CC;strokeColor=#D6B656;strokeWidth=2;fontSize=14;fontColor=#5D4037;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="st-1">
+          <mxGeometry x="30" y="650" width="540" height="360" as="geometry"/>
+        </mxCell>
+        <mxCell id="st-boundary" value="CODE TO RTL TRACEABILITY&#xa;&#xa;QCAU.py:8-59 local linear/RMS/RoPE helpers&#xa;QCAU.py:106-189 online sparse attention core&#xa;QCAU.py:192-370 standalone orchestration and output projection&#xa;model.py Attention.forward(): actual model-side Q/KV/cache/topk preparation&#xa;model.py Compressor: compressed KV creation and decode state&#xa;model.py Indexer: learned compressed address selection&#xa;kernel.py sparse_attn: native TileLang analogue of the core&#xa;&#xa;When drawing hardware, use QCAU.py recurrence as the functional contract and model.py as the producer/consumer contract." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#EAF2F8;strokeColor=#2874A6;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="st-1">
+          <mxGeometry x="650" y="650" width="570" height="360" as="geometry"/>
+        </mxCell>
+        <mxCell id="st-address" value="ADDRESS / MEMORY SIZING EXAMPLES&#xa;&#xa;Window-only KV SRAM: 128 rows x 512 values.&#xa;Compressed ratio=4 cache: (128+1024)=1152 rows x 512 values.&#xa;At 16-bit values: 1152*512*16 = 9,437,184 bits = 1,179,648 bytes per batch element per layer, before metadata.&#xa;&#xa;Index tile metadata: T=64 integer addresses per query row.&#xa;QK score tile: H_local x T values per query row.&#xa;Weighted V accumulator: H_local x 512 values per query row." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5EEF8;strokeColor=#7D3C98;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="st-1">
+          <mxGeometry x="1300" y="650" width="500" height="360" as="geometry"/>
+        </mxCell>
+        <mxCell id="st-caveat" value="DO NOT CONFUSE THESE THREE LEVELS&#xa;&#xa;Level 1: QCAU.py = readable functional PyTorch golden model.&#xa;Level 2: model.py = complete MLA integration including Compressor and Indexer.&#xa;Level 3: kernel.py = TileLang GPU implementation; it describes a possible high-performance schedule, not the complete model-side address producer." style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#F4F6F7;strokeColor=#7B7D7D;strokeWidth=2;fontSize=14;fontColor=#17202A;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="st-1">
+          <mxGeometry x="1880" y="650" width="500" height="310" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="qcau-detail-compress" name="08_Compressor_Indexer_and_Cache">
+    <mxGraphModel dx="3000" dy="1800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3200" pageHeight="2000" math="0" shadow="0">
+      <root>
+        <mxCell id="ci-0"/>
+        <mxCell id="ci-1" parent="ci-0"/>
+        <mxCell id="ci-title" value="MODEL-SIDE PRODUCERS OF QCAU KV ROWS AND ADDRESSES" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=25;fontStyle=1;fontColor=#17202A;" vertex="1" parent="ci-1">
+          <mxGeometry x="30" y="20" width="2400" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="ci-sub" value="Compressor and Indexer are in model.py. They do not replace the QCAU core; they create compressed KV rows and top-k addresses that QCAU consumes." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=14;fontColor=#566573;" vertex="1" parent="ci-1">
+          <mxGeometry x="32" y="62" width="2500" height="28" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ci-x" value="ATTENTION INPUT&#xa;&#xa;x [B,S,D] = [B,S,4096]&#xa;qr [B,S,q_lora_rank] = [B,S,1024]&#xa;&#xa;Both branches receive the same token hidden states. qr is the low-rank Q state before the main q expansion." style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#D6EAF8;strokeColor=#2874A6;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ci-1">
+          <mxGeometry x="30" y="270" width="350" height="220" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ci-linear" value="COMPRESSOR CANDIDATE LINEARS&#xa;&#xa;Compressor.forward() converts x to float.&#xa;&#xa;wkv(x): [B,S,coff*Dh]&#xa;wgate(x): [B,S,coff*Dh]&#xa;&#xa;coff = 1 for ratio != 4.&#xa;coff = 2 for ratio=4 overlap mode.&#xa;For ratio=4: width = 2*512 = 1024." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#EAF2F8;strokeColor=#2874A6;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ci-1">
+          <mxGeometry x="470" y="160" width="380" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="ci-pool" value="GATED RATIO POOLING, PREFILL&#xa;&#xa;score = wgate(x) + ape&#xa;ape [ratio,coff*Dh]&#xa;&#xa;Reshape full groups:&#xa;kv [B,S/r,r,coff*Dh]&#xa;score [B,S/r,r,coff*Dh]&#xa;&#xa;ratio=4 overlap_transform:&#xa;[B,S/r,2r,Dh]&#xa;invalid overlap lanes get -inf score or zero value.&#xa;&#xa;softmax(score, dim=ratio positions)&#xa;weighted sum over ratio -&gt; [B,S/r,Dh]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5EEF8;strokeColor=#7D3C98;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ci-1">
+          <mxGeometry x="910" y="125" width="430" height="355" as="geometry"/>
+        </mxCell>
+        <mxCell id="ci-post" value="COMPRESSED KV POSTPROCESS&#xa;&#xa;kv_compressed [B,S_c,512]&#xa;RMSNorm over 512.&#xa;RoPE on last R=64.&#xa;&#xa;rotate=False: act_quant on first 448 values, block size 64.&#xa;rotate=True for Indexer compressor: Hadamard rotation, then FP4 activation simulation.&#xa;&#xa;Output is written into compressed cache at offset W in decode layout." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5F5E3;strokeColor=#148F77;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ci-1">
+          <mxGeometry x="1400" y="125" width="430" height="355" as="geometry"/>
+        </mxCell>
+        <mxCell id="ci-state" value="DECODE COMPRESSOR STATE&#xa;&#xa;kv_state and score_state hold unfinished ratio groups.&#xa;&#xa;At start_pos=p, S=1:&#xa;should_compress = ((p+1) % ratio == 0)&#xa;&#xa;ratio=4 overlap state has two windows: previous overlap rows and current rows.&#xa;When should_compress=True, concatenate valid halves, softmax over state positions, produce one [B,1,512] row, shift state for the next group." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDEDEC;strokeColor=#C0392B;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ci-1">
+          <mxGeometry x="910" y="590" width="430" height="330" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ci-iq" value="INDEXER QUERY PATH, ratio=4&#xa;&#xa;qr [B,S,1024]&#xa;wq_b_index: [H_i*D_i,1024]&#xa;H_i=64 global, D_i=128&#xa;H_i_local=64/world_size&#xa;&#xa;Logical q_index [B,S,64,128].&#xa;MP=4 local q_index [B,S,16,128].&#xa;Apply RoPE to last R=64.&#xa;Hadamard rotation across 128.&#xa;FP4 activation simulation." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#EAF2F8;strokeColor=#2874A6;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ci-1">
+          <mxGeometry x="30" y="670" width="380" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="ci-ikv" value="INDEXER COMPRESSED KV&#xa;&#xa;Indexer owns a Compressor(..., head_dim=128, rotate=True).&#xa;&#xa;indexer.kv_cache [B,max_seq_len/4,128]&#xa;For max_seq_len=4096: [B,1024,128].&#xa;&#xa;The index compressor creates rows used only for address scoring; the main QCAU value path uses the main Attention compressed KV cache with width 512." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDEDEC;strokeColor=#C0392B;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ci-1">
+          <mxGeometry x="470" y="670" width="380" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="ci-score" value="INDEX SCORE COMPUTE&#xa;&#xa;weights = weights_proj(x)&#xa;weights [B,S,H_i]&#xa;scale = D_i^(-1/2) * H_i^(-1/2)&#xa;&#xa;index_score = einsum(q_index, indexer.kv_cache)&#xa;raw [B,S,H_i,N_c]&#xa;relu(raw), multiply weights, sum over H_i&#xa;&#xa;final index_score [B,S,N_c]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FEF9E7;strokeColor=#B7950B;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ci-1">
+          <mxGeometry x="910" y="990" width="430" height="325" as="geometry"/>
+        </mxCell>
+        <mxCell id="ci-topk" value="INDEXER MASK + TOPK&#xa;&#xa;Prefill causal mask: compressed index j is invalid when j &gt;= floor((s+1)/ratio).&#xa;Invalid score becomes -inf.&#xa;&#xa;topk_idxs = topk(index_score, min(index_topk,end_pos/ratio))&#xa;index_topk=512.&#xa;&#xa;Prefill: selected future entries -&gt; -1; legal entries + offset=S.&#xa;Decode: selected entries + offset=W.&#xa;&#xa;Output compressed_idx [B,S,K_c]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ci-1">
+          <mxGeometry x="1400" y="990" width="430" height="325" as="geometry"/>
+        </mxCell>
+        <mxCell id="ci-window" value="WINDOW INDEX + CONCATENATION&#xa;&#xa;window_idx = get_window_topk_idxs(128,B,S,start_pos)&#xa;shape [B,S,128]&#xa;&#xa;If ratio=0: topk_idxs = window_idx.&#xa;If ratio!=0: topk_idxs = cat(window_idx, compressed_idx).&#xa;shape [B,S,128+K_c].&#xa;&#xa;topk_idxs is converted to int32 and sent to QCAU with kv and q." style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#D5F5E3;strokeColor=#148F77;strokeWidth=3;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ci-1">
+          <mxGeometry x="1900" y="640" width="400" height="315" as="geometry"/>
+        </mxCell>
+        <mxCell id="ci-note" value="SEPARATION OF VALUE AND INDEX PATHS&#xa;&#xa;Main Attention compressor: width 512, feeds QCAU values and latent K rows.&#xa;Indexer compressor: width 128, feeds learned address scoring only.&#xa;&#xa;Both paths use the same token input and position frequencies, but their output caches have different widths and must not be connected interchangeably." style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#FFF2CC;strokeColor=#D6B656;strokeWidth=2;fontSize=14;fontColor=#5D4037;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ci-1">
+          <mxGeometry x="1900" y="1020" width="400" height="300" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ci-e1" value="x [B,S,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2874A6;strokeWidth=2;endArrow=block;" edge="1" parent="ci-1" source="ci-x" target="ci-linear"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ci-e2" value="kv,score [B,S,coff*512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#7D3C98;strokeWidth=2;endArrow=block;" edge="1" parent="ci-1" source="ci-linear" target="ci-pool"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ci-e3" value="compressed row [B,S_c,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#148F77;strokeWidth=2;endArrow=block;" edge="1" parent="ci-1" source="ci-pool" target="ci-post"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ci-e4" value="unfinished state [B,*,coff*512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C0392B;strokeWidth=2;endArrow=block;" edge="1" parent="ci-1" source="ci-state" target="ci-post"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ci-e5" value="qr [B,S,1024]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2874A6;strokeWidth=2;endArrow=block;" edge="1" parent="ci-1" source="ci-x" target="ci-iq"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ci-e6" value="q_index [B,S,64,128]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2874A6;strokeWidth=2;endArrow=block;" edge="1" parent="ci-1" source="ci-iq" target="ci-score"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ci-e7" value="index kv [B,N_c,128]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C0392B;strokeWidth=2;endArrow=block;" edge="1" parent="ci-1" source="ci-ikv" target="ci-score"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ci-e8" value="index_score [B,S,N_c]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B7950B;strokeWidth=2;endArrow=block;" edge="1" parent="ci-1" source="ci-score" target="ci-topk"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ci-e9" value="compressed_idx [B,S,K_c]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B7950B;strokeWidth=2;endArrow=block;" edge="1" parent="ci-1" source="ci-topk" target="ci-window"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ci-e10" value="window_idx [B,S,128]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#7B7D7D;strokeWidth=2;endArrow=block;" edge="1" parent="ci-1" source="ci-x" target="ci-window"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ci-e11" value="topk_idxs int32 [B,S,K_total]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#148F77;strokeWidth=2;endArrow=block;" edge="1" parent="ci-1" source="ci-window" target="ci-note"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="qcau-detail-address" name="09_KV_Address_Packet_and_Memory">
+    <mxGraphModel dx="2800" dy="1500" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3000" pageHeight="1700" math="0" shadow="0">
+      <root>
+        <mxCell id="ad-0"/>
+        <mxCell id="ad-1" parent="ad-0"/>
+        <mxCell id="ad-title" value="KV ADDRESS PACKET, MEMORY LAYOUT AND GATHER CONTRACT" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=25;fontStyle=1;fontColor=#17202A;" vertex="1" parent="ad-1">
+          <mxGeometry x="30" y="20" width="2200" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="ad-sub" value="This page translates the Python dense gather into the logical SRAM interfaces an RTL QCAU would need." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=14;fontColor=#566573;" vertex="1" parent="ad-1">
+          <mxGeometry x="32" y="62" width="2300" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="ad-packet" value="ADDRESS PACKET PER QUERY ROW&#xa;&#xa;topk_idxs[b,s,:]&#xa;shape [K_total] int32&#xa;&#xa;Pure window: K_total=128.&#xa;Learned compressed layer: K_total=128+K_c.&#xa;&#xa;For every local head h, the same token address list is reused with q[b,s,h,:].&#xa;There is no separate index tensor per query head in QCAU core." style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fillColor=#FCF3CF;strokeColor=#B7950B;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ad-1">
+          <mxGeometry x="30" y="180" width="380" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="ad-tile" value="TILE SELECTOR&#xa;&#xa;tile_base = 0,64,128,...&#xa;tile_idxs = topk_idxs[...,tile_base:tile_base+64]&#xa;&#xa;Shape [B,S,T], T=64 except final tile.&#xa;&#xa;One control counter selects the same tile range for all batches and query rows; tensorized Python code expresses the complete batch operation." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#EAF2F8;strokeColor=#2874A6;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ad-1">
+          <mxGeometry x="480" y="180" width="380" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="ad-valid" value="VALID + SAFE ADDRESS&#xa;&#xa;valid = (idx &gt;= 0) &amp; (idx &lt; N)&#xa;safe_idx = clamp(idx,0,N-1)&#xa;&#xa;valid travels with each address.&#xa;safe_idx is used only to avoid illegal SRAM reads.&#xa;Invalid safe reads are zeroed immediately after gather and scores are later masked to -inf." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDEDEC;strokeColor=#C0392B;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ad-1">
+          <mxGeometry x="930" y="180" width="380" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="ad-expand" value="ROW-WIDTH ADDRESS EXPANSION&#xa;&#xa;gather_index = safe_idx.unsqueeze(-1).expand([B,S,T,Dh])&#xa;&#xa;Dh=512.&#xa;Logical index traffic is [B,S,T] addresses; the expanded index is a vectorized view used to gather all 512 row elements." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5EEF8;strokeColor=#7D3C98;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ad-1">
+          <mxGeometry x="1380" y="180" width="380" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="ad-sram" value="KV SRAM / CACHE VIEW&#xa;&#xa;Logical tensor kv_float [B,N,512].&#xa;&#xa;Window-only: N=128 rows.&#xa;Ratio=4 decode cache: N=128+1024=1152 rows.&#xa;Ratio=128 decode cache: N=128+32=160 rows.&#xa;&#xa;Each row is 512 activation values. For 16-bit values, one ratio=4 cache is 1152*512*16 = 9,437,184 bits per batch element per layer." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5F5E3;strokeColor=#148F77;strokeWidth=3;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ad-1">
+          <mxGeometry x="1830" y="180" width="430" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="ad-gather" value="GATHER RESULT&#xa;&#xa;torch.gather(kv_float, dim=1, index=gather_index.reshape(B,S*T,Dh))&#xa;&#xa;Intermediate: [B,S*T,512].&#xa;Reshape: [B,S,T,512].&#xa;where(valid[...,None], value, zero).&#xa;&#xa;This is the exact KV tile consumed by QK and weighted-V paths." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D6EAF8;strokeColor=#2874A6;strokeWidth=3;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ad-1">
+          <mxGeometry x="930" y="590" width="420" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="ad-q" value="Q ROW BUFFER&#xa;&#xa;q_float[b,s,:,:]&#xa;shape [H_local,512]&#xa;&#xa;MP=1: [64,512].&#xa;MP=4: [16,512].&#xa;&#xa;For one query row, this buffer is reused for all T tiles. The KV tile changes each iteration." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#EAF2F8;strokeColor=#2874A6;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ad-1">
+          <mxGeometry x="30" y="610" width="380" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="ad-score" value="SCORE TILE BUFFER&#xa;&#xa;scores [H_local,T] per query row&#xa;&#xa;MP=1: [64,64] values.&#xa;MP=4: [16,64] values.&#xa;&#xa;After scale and valid mask, this tile feeds max reduction, exp and weighted-V accumulation." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FEF9E7;strokeColor=#B7950B;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ad-1">
+          <mxGeometry x="480" y="610" width="380" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="ad-state" value="PER-QUERY RUNNING STATE&#xa;&#xa;For one b,s:&#xa;m [H_local]&#xa;l [H_local]&#xa;o [H_local,512]&#xa;&#xa;MP=1 storage: 64 + 64 + 64*512 = 32896 scalar values.&#xa;MP=4 storage: 16 + 16 + 16*512 = 8224 scalar values.&#xa;&#xa;State is updated after every tile and finally normalized." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5EEF8;strokeColor=#7D3C98;strokeWidth=2;fontSize=14;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ad-1">
+          <mxGeometry x="1410" y="610" width="380" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="ad-rtl" value="RTL MEMORY INTERFACE SUGGESTION&#xa;&#xa;Address SRAM: [B,S,T] x int32 plus valid bit.&#xa;KV SRAM: row address -&gt; 512-value row.&#xa;Gather buffer: T rows x 512 values.&#xa;Q buffer: H_local rows x 512 values.&#xa;Score buffer: H_local x T.&#xa;Accumulator: H_local x 512 FP32.&#xa;&#xa;The exact banking/tiling is an implementation choice; the shapes and dependencies are the functional contract." style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#FFF2CC;strokeColor=#D6B656;strokeWidth=2;fontSize=14;fontColor=#5D4037;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="ad-1">
+          <mxGeometry x="1830" y="610" width="430" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="ad-e1" value="idx packet [B,S,T]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B7950B;strokeWidth=2;endArrow=block;" edge="1" parent="ad-1" source="ad-packet" target="ad-tile"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ad-e2" value="tile_idxs [B,S,T]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2874A6;strokeWidth=2;endArrow=block;" edge="1" parent="ad-1" source="ad-tile" target="ad-valid"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ad-e3" value="safe_idx [B,S,T]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C0392B;strokeWidth=2;endArrow=block;" edge="1" parent="ad-1" source="ad-valid" target="ad-expand"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ad-e4" value="expanded index [B,S,T,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#7D3C98;strokeWidth=2;endArrow=block;" edge="1" parent="ad-1" source="ad-expand" target="ad-sram"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ad-e5" value="kv_tile [B,S,T,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#148F77;strokeWidth=2;endArrow=block;" edge="1" parent="ad-1" source="ad-sram" target="ad-gather"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ad-e6" value="q row [H_local,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2874A6;strokeWidth=2;endArrow=block;" edge="1" parent="ad-1" source="ad-q" target="ad-gather"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ad-e7" value="q dot kv_tile -&gt; [H_local,T]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B7950B;strokeWidth=2;endArrow=block;" edge="1" parent="ad-1" source="ad-gather" target="ad-score"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ad-e8" value="score tile + V tile" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#148F77;strokeWidth=2;endArrow=block;" edge="1" parent="ad-1" source="ad-score" target="ad-state"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="qcau-detail-wiring" name="10_Concrete_Block_Wiring">
+    <mxGraphModel dx="3200" dy="5600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3400" pageHeight="5800" background="#101820" math="0" shadow="0">
+      <root>
+        <mxCell id="wire-0"/>
+        <mxCell id="wire-1" parent="wire-0"/>
+        <mxCell id="wire-title" value="CONCRETE CODE WIRING: Block.forward() -&gt; Attention.forward() -&gt; QCAU -&gt; MoE" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=25;fontStyle=1;fontColor=#FFFFFF;" vertex="1" parent="wire-1">
+          <mxGeometry x="30" y="20" width="2500" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-sub" value="This page follows the actual connections in inference/model.py. QCAU is highlighted inside the Attention.forward() region. Every labeled wire is a tensor, parameter, state or control packet." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=14;fontColor=#B8C7D1;" vertex="1" parent="wire-1">
+          <mxGeometry x="32" y="62" width="2850" height="28" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="wire-block" value="TRANSFORMER BLOCK l = 0..n_layers-1&#xa;&#xa;Block.forward(x, start_pos, input_ids)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#455A64;strokeWidth=2;dashed=1;fontSize=16;fontStyle=1;fontColor=#B8C7D1;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="20" y="105" width="3060" height="5350" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="wire-in" value="X_l INPUT&#xa;&#xa;x [B,S,hc_mult,D]&#xa;default hc_mult=4, D=4096&#xa;&#xa;Source: previous Block or Transformer embedding expansion.&#xa;Residual A keeps the exact tensor for hc_post after attention." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#263238;strokeColor=#90A4AE;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="90" y="160" width="350" height="205" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-resA" value="RESIDUAL A&#xa;&#xa;residual = x&#xa;shape [B,S,4,4096]&#xa;&#xa;This branch bypasses attention and enters Attention HC post." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#1F2933;strokeColor=#9575CD;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="90" y="430" width="350" height="170" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-hcpre-a" value="PRE-BLOCK mHC: hc_pre(attn)&#xa;&#xa;Input x [B,S,4,4096].&#xa;flatten -&gt; [B,S,16384].&#xa;mixes = F.linear(x,hc_attn_fn) * rsqrt(mean(x^2)+eps).&#xa;hc_attn_fn [24,16384] -&gt; mixes [B,S,24].&#xa;&#xa;hc_split_sinkhorn:&#xa;pre_A [B,S,4], post_A [B,S,4], comb_A [B,S,4,4].&#xa;y_A = sum(pre_A * x, dim=hc) -&gt; [B,S,4096]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#311B52;strokeColor=#B388FF;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="600" y="145" width="470" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-attnnorm" value="ATTENTION RMSNORM&#xa;&#xa;attn_norm(y_A)&#xa;&#xa;Input/output: [B,S,4096].&#xa;This is the x consumed by Attention.forward()." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#263238;strokeColor=#90A4AE;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="1200" y="195" width="330" height="175" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="wire-attn" value="ATTENTION.forward(x, start_pos)&#xa;&#xa;Actual model-side producer/consumer boundary.&#xa;Q path, KV path, Compressor, Indexer, cache and QCAU are wired below." style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#607D8B;strokeWidth=2;dashed=1;fontSize=16;fontStyle=1;fontColor=#CFD8DC;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="470" y="480" width="2480" height="1800" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="wire-qr" value="1. Q LOW-RANK PROJ&#xa;&#xa;qr = q = q_norm(wq_a(x))&#xa;wq_a [1024,4096]&#xa;&#xa;x [B,S,4096] -&gt; qr [B,S,1024]&#xa;qr is reused by Indexer." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#0D2A4A;strokeColor=#42A5F5;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="520" y="575" width="350" height="205" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-qexp" value="2. Q HEAD EXPANSION&#xa;&#xa;q = wq_b(qr)&#xa;wq_b logical [H*Dh,1024] = [32768,1024]&#xa;&#xa;global output [B,S,32768].&#xa;ColumnParallelLinear gives local [B,S,H_local*512]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#0D2A4A;strokeColor=#42A5F5;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="940" y="575" width="350" height="225" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-qrope" value="3. Q RESHAPE + RoPE&#xa;&#xa;unflatten(-1,[H_local,512]).&#xa;q *= rsqrt(mean(q^2,last_dim)+eps).&#xa;apply_rotary_emb(q[...,-64:], freqs_cis).&#xa;&#xa;q [B,S,H_local,512]&#xa;MP=1: H_local=64; MP=4: H_local=16." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#0D2A4A;strokeColor=#42A5F5;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="1360" y="575" width="390" height="240" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="wire-kv" value="4. KV LATENT PROJ&#xa;&#xa;kv = kv_norm(wkv(x))&#xa;wkv [512,4096]&#xa;&#xa;x [B,S,4096] -&gt; kv [B,S,512].&#xa;apply_rotary_emb(kv[...,-64:], freqs_cis).&#xa;Non-RoPE width=448." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#0B3B2E;strokeColor=#26C281;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="520" y="940" width="350" height="220" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-kvq" value="5. KV QAT / ACTIVATION QUANT&#xa;&#xa;act_quant(kv[...,:-64], block_size=64, inplace=True).&#xa;&#xa;448 non-RoPE values = 7 blocks x 64.&#xa;RoPE tail 64 stays in activation precision.&#xa;&#xa;Output kv [B,S,512]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#0B3B2E;strokeColor=#26C281;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="940" y="940" width="350" height="225" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-cache" value="6. MAIN KV CACHE&#xa;&#xa;self.kv_cache [B,N_cache,512].&#xa;ratio=0: N_cache=W=128.&#xa;ratio=4: N_cache=128+1024=1152.&#xa;ratio=128: N_cache=128+32=160.&#xa;&#xa;Prefill: write current window.&#xa;Decode: cache[:, start_pos % 128] = kv[:,0]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#0B3B2E;strokeColor=#26C281;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="1360" y="940" width="390" height="260" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="wire-compress" value="7. OPTIONAL MAIN COMPRESSOR&#xa;&#xa;compressor(x,start_pos) when ratio != 0.&#xa;wkv_c(x), wgate(x): [B,S,coff*512].&#xa;ratio=4: coff=2 overlap mode.&#xa;score = wgate + ape.&#xa;softmax over ratio positions.&#xa;weighted sum -&gt; compressed kv [B,S_c,512].&#xa;&#xa;Writes compressed rows at cache offset W in decode mode." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#0B3B2E;strokeColor=#26C281;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="1790" y="920" width="430" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-index" value="8. OPTIONAL INDEXER, ratio=4&#xa;&#xa;Inputs x [B,S,4096] and qr [B,S,1024].&#xa;index q [B,S,H_i_local,128], H_i=64 global; H_i_local=64/world_size (16 at MP=4).&#xa;Indexer compressed KV [B,N_c,128].&#xa;index_score [B,S,N_c].&#xa;topk(min(512,N_c)) -&gt; compressed_idx [B,S,K_c].&#xa;&#xa;Future compressed positions become -1; legal positions receive offset." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#493B00;strokeColor=#FFCA28;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="1790" y="575" width="430" height="285" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-window" value="9. WINDOW ADDRESS GENERATOR&#xa;&#xa;get_window_topk_idxs(128,B,S,start_pos).&#xa;&#xa;window_idx [B,S,128].&#xa;Future/unavailable addresses are -1.&#xa;Decode p>=127 rotates circular order by p % 128." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#493B00;strokeColor=#FFCA28;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="2270" y="575" width="390" height="225" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-topk" value="10. TOP-K ADDRESS PACKET&#xa;&#xa;ratio=0: topk_idxs = window_idx [B,S,128].&#xa;ratio!=0: cat(window_idx, compressed_idx)&#xa;-&gt; [B,S,K_total].&#xa;topk_idxs = int32.&#xa;&#xa;Same address packet is reused for every local query head." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#493B00;strokeColor=#FFCA28;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="2270" y="940" width="390" height="225" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-kvfeed" value="11. KV FEED TO QCAU&#xa;&#xa;Prefill ratio=0: kv [B,S,512].&#xa;Prefill ratio!=0: if compressor emits, cat(current kv, compressed kv) [B,N,512]; otherwise current kv remains [B,S,512].&#xa;Decode: self.kv_cache[:B] [B,N_cache,512].&#xa;&#xa;This is the exact kv argument passed to QCAU." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#0B3B2E;strokeColor=#26C281;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="1790" y="1290" width="430" height="250" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-sink" value="ATTENTION SINK PARAMETER&#xa;&#xa;self.attn_sink [H_local]&#xa;one FP32 scalar per local query head.&#xa;Used only in final softmax denominator." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#493B00;strokeColor=#FFCA28;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="2270" y="1290" width="390" height="170" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-qcau" value="12. QCAU CORE CALL&#xa;&#xa;QCAU(q=q, kv=kv, attn_sink=self.attn_sink, topk_idxs=topk_idxs, softmax_scale=512^-1/2, tile_size=64).&#xa;&#xa;q [B,S,H_local,512]&#xa;kv [B,N,512]&#xa;topk_idxs [B,S,K_total]&#xa;sink [H_local]&#xa;&#xa;Output o [B,S,H_local,512]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#4A3200;strokeColor=#FFB300;strokeWidth=3;fontSize=15;fontStyle=1;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=14;spacingLeft=16;" vertex="1" parent="wire-1">
+          <mxGeometry x="2210" y="1660" width="500" height="300" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="wire-inv" value="13. INVERSE RoPE&#xa;&#xa;apply_rotary_emb(o[...,-64:], freqs_cis, inverse=True).&#xa;Conjugate complex coefficient.&#xa;&#xa;o_derot [B,S,H_local,512]" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#174A45;strokeColor=#26A69A;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="2210" y="2040" width="500" height="190" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-group" value="14. GROUPED HEAD VIEW&#xa;&#xa;o = o.view(B,S,n_local_groups,-1).&#xa;&#xa;MP=1: [B,S,64,512] -&gt; [B,S,8,4096].&#xa;MP=4: [B,S,16,512] -&gt; [B,S,2,4096].&#xa;&#xa;Invariant: H_local*512 = G_local*4096." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#174A45;strokeColor=#26A69A;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="2210" y="2320" width="500" height="215" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-woa" value="15. GROUPED wo_a&#xa;&#xa;wo_a = self.wo_a.weight.view(G_local,OR,-1).&#xa;MP=1: [8,1024,4096].&#xa;MP=4: [2,1024,4096].&#xa;&#xa;einsum('bsgd,grd-&gt;bsgr', o, wo_a)&#xa;[B,S,G_local,4096] -&gt; [B,S,G_local,1024]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#0D2A4A;strokeColor=#42A5F5;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="2210" y="2630" width="500" height="230" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-wob" value="16. wo_b ROW-PARALLEL OUTPUT&#xa;&#xa;o.flatten(2): MP=1 [B,S,8192]; MP=4 local [B,S,2048].&#xa;wo_b global logical [4096,8192].&#xa;RowParallelLinear local weight MP=4 [4096,2048], then all_reduce.&#xa;&#xa;x_attn [B,S,4096]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#0D2A4A;strokeColor=#42A5F5;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="2210" y="2960" width="500" height="250" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="wire-hcpost-a" value="17. POST-BLOCK mHC: hc_post(attn)&#xa;&#xa;x_attn [B,S,4096]&#xa;residual A [B,S,4,4096]&#xa;post_A [B,S,4], comb_A [B,S,4,4]&#xa;&#xa;y = post_A*x_attn + sum(comb_A*residual_A, dim=source_hc)&#xa;-&gt; [B,S,4,4096]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#311B52;strokeColor=#B388FF;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="2210" y="3320" width="500" height="250" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="wire-hcpre-f" value="18. PRE-BLOCK mHC: hc_pre(ffn)&#xa;&#xa;Input [B,S,4,4096]&#xa;flatten [B,S,16384]&#xa;hc_ffn_fn [24,16384]&#xa;mixes [B,S,24]&#xa;&#xa;Outputs: y_F [B,S,4096], post_F [B,S,4], comb_F [B,S,4,4]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#311B52;strokeColor=#B388FF;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="2210" y="3680" width="500" height="235" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-ffnnorm" value="19. FFN RMSNORM&#xa;&#xa;ffn_norm(y_F)&#xa;&#xa;Input/output [B,S,4096].&#xa;Flatten tokens for MoE:&#xa;tokens [N_tok,4096], N_tok=B*S." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#263238;strokeColor=#90A4AE;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="2210" y="4025" width="500" height="205" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="wire-moe" value="MOE FOR CONTEXT ONLY: exact model.py consumer after QCAU&#xa;&#xa;MoE.forward() receives tokens [N_tok,4096] and returns [N_tok,4096], then reshapes to [B,S,4096]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#607D8B;strokeWidth=2;dashed=1;fontSize=16;fontStyle=1;fontColor=#CFD8DC;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="440" y="4300" width="2350" height="720" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-gate" value="20. GATE / ROUTER&#xa;&#xa;linear(tokens, gate.weight)&#xa;scores [N_tok,256] for n_routed_experts=256.&#xa;score_func = softmax/sigmoid/sqrtsoftplus.&#xa;Hash layers use tid2eid[input_ids].&#xa;Otherwise topk K=6.&#xa;&#xa;indices [N_tok,6], weights [N_tok,6]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#493B00;strokeColor=#FFCA28;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="520" y="4430" width="470" height="265" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-shared" value="21. SHARED EXPERT&#xa;&#xa;Expert(dim=4096, inter_dim=2048).&#xa;w1/w3: [N_tok,4096] -&gt; [N_tok,2048].&#xa;SwiGLU: silu(gate)*up.&#xa;w2: [N_tok,2048] -&gt; [N_tok,4096].&#xa;&#xa;shared_y [N_tok,4096]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#4A2200;strokeColor=#FF7043;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="1080" y="4430" width="470" height="265" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-routed" value="22. ROUTED EXPERTS&#xa;&#xa;For each selected expert: gather assigned token rows.&#xa;Each expert computes SwiGLU inter_dim=2048.&#xa;Output per assigned token [*,4096].&#xa;Multiply by gate weight [*,1].&#xa;Accumulate into routed_y [N_tok,4096].&#xa;&#xa;There are K=6 selected experts/token." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#4A2200;strokeColor=#FF7043;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="1640" y="4430" width="470" height="285" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-combine" value="23. MOE COMBINE&#xa;&#xa;y = routed_y + shared_y&#xa;&#xa;y [N_tok,4096]&#xa;reshape -&gt; [B,S,4096].&#xa;No QCAU operation occurs here; this is the following FFN branch in Block.forward()." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#4A2200;strokeColor=#FF7043;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="1080" y="4810" width="470" height="175" as="geometry"/>
+        </mxCell>
+        <mxCell id="wire-hcpost-f" value="24. POST-BLOCK mHC: hc_post(ffn)&#xa;&#xa;MoE y [B,S,4096]&#xa;residual B [B,S,4,4096]&#xa;post_F [B,S,4], comb_F [B,S,4,4]&#xa;&#xa;Output x_next [B,S,4,4096] to next transformer block." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#311B52;strokeColor=#B388FF;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="wire-1">
+          <mxGeometry x="2210" y="5220" width="500" height="225" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="wire-e1" value="x [B,S,4,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B388FF;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-in" target="wire-hcpre-a"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e2" value="residual A [B,S,4,4096]" style="dashed=1;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#9575CD;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-in" target="wire-resA"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e3" value="y_A [B,S,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#90A4AE;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-hcpre-a" target="wire-attnnorm"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e4" value="x [B,S,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#90A4AE;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-attnnorm" target="wire-qr"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e5" value="qr [B,S,1024]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#42A5F5;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-qr" target="wire-qexp"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e6" value="q_flat [B,S,H_local*512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#42A5F5;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-qexp" target="wire-qrope"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e7" value="q [B,S,H_local,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#42A5F5;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-qrope" target="wire-qcau"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e8" value="x [B,S,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#90A4AE;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-attnnorm" target="wire-kv"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e9" value="kv [B,S,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#26C281;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-kv" target="wire-kvq"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e10" value="kv [B,S,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#26C281;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-kvq" target="wire-cache"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e11" value="x [B,S,4096]" style="dashed=1;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#26C281;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-attnnorm" target="wire-compress"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e12" value="compressed kv [B,S_c,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#26C281;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-compress" target="wire-kvfeed"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e13" value="cache/current kv" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#26C281;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-cache" target="wire-kvfeed"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e14" value="x [B,S,4096]" style="dashed=1;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FFCA28;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-attnnorm" target="wire-index"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e15" value="qr [B,S,1024]" style="dashed=1;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FFCA28;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-qr" target="wire-index"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e16" value="compressed_idx [B,S,K_c]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FFCA28;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-index" target="wire-topk"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e17" value="window_idx [B,S,128]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FFCA28;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-window" target="wire-topk"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e18" value="topk_idxs [B,S,K_total] int32" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FFCA28;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-topk" target="wire-qcau"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e19" value="kv [B,N,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#26C281;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-kvfeed" target="wire-qcau"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e20" value="attn_sink [H_local]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FFCA28;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-sink" target="wire-qcau"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e21" value="o [B,S,H_local,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#26A69A;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-qcau" target="wire-inv"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e22" value="o_derot [B,S,H_local,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#26A69A;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-inv" target="wire-group"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e23" value="o_grouped [B,S,G_local,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#42A5F5;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-group" target="wire-woa"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e24" value="o_lowrank [B,S,G_local,1024]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#42A5F5;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-woa" target="wire-wob"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e25" value="x_attn [B,S,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#42A5F5;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-wob" target="wire-hcpost-a"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e26" value="post_A + comb_A" style="dashed=1;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B388FF;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-hcpre-a" target="wire-hcpost-a"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e27" value="residual A [B,S,4,4096]" style="dashed=1;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#9575CD;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-resA" target="wire-hcpost-a"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e28" value="x_attn_out [B,S,4,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B388FF;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-hcpost-a" target="wire-hcpre-f"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e29" value="y_F [B,S,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#90A4AE;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-hcpre-f" target="wire-ffnnorm"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e30" value="post_F + comb_F" style="dashed=1;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B388FF;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-hcpre-f" target="wire-hcpost-f"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e31" value="residual B [B,S,4,4096]" style="dashed=1;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#9575CD;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-hcpost-a" target="wire-hcpost-f"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e32" value="tokens [N_tok,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#90A4AE;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-ffnnorm" target="wire-gate"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e33" value="tokens [N_tok,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF7043;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-ffnnorm" target="wire-shared"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e34" value="indices [N_tok,6] + weights [N_tok,6]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FFCA28;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-gate" target="wire-routed"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e35" value="shared_y [N_tok,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF7043;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-shared" target="wire-combine"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e36" value="routed_y [N_tok,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF7043;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-routed" target="wire-combine"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e37" value="MoE y [B,S,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF7043;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-combine" target="wire-hcpost-f"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="wire-e38" value="x_next [B,S,4,4096]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#B388FF;strokeWidth=2;endArrow=block;" edge="1" parent="wire-1" source="wire-hcpost-f" target="wire-in"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="qcau-detail-core-wiring" name="11_Concrete_QCAU_Core_Wiring">
+    <mxGraphModel dx="3300" dy="2200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3500" pageHeight="2400" background="#101820" math="0" shadow="0">
+      <root>
+        <mxCell id="cw-0"/>
+        <mxCell id="cw-1" parent="cw-0"/>
+        <mxCell id="cw-title" value="QCAU CORE INTERNAL WIRING: _sparse_attention_online()" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=25;fontStyle=1;fontColor=#FFFFFF;" vertex="1" parent="cw-1">
+          <mxGeometry x="30" y="20" width="2300" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="cw-sub" value="One row below means one tile iteration. The loop repeats for tile_base = 0,64,128,...,K_total-1. This is the direct dataflow contract for an RTL QCAU attention engine." style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=14;fontColor=#B8C7D1;" vertex="1" parent="cw-1">
+          <mxGeometry x="32" y="62" width="2800" height="28" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="cw-q" value="Q INPUT BUFFER&#xa;&#xa;q [B,S,H_local,Dh]&#xa;Dh=512; H_local=64 MP=1 or 16 MP=4&#xa;&#xa;q_float = q.float()&#xa;Used for every tile of the same query row." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#0D2A4A;strokeColor=#42A5F5;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="cw-1">
+          <mxGeometry x="40" y="160" width="360" height="220" as="geometry"/>
+        </mxCell>
+        <mxCell id="cw-kv" value="KV MEMORY&#xa;&#xa;kv_float [B,N,512]&#xa;N=128 window-only; ratio=4 decode N=1152; ratio=128 decode N=160.&#xa;Each row is one latent K/V vector of width 512." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#0B3B2E;strokeColor=#26C281;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="cw-1">
+          <mxGeometry x="40" y="490" width="360" height="190" as="geometry"/>
+        </mxCell>
+        <mxCell id="cw-idx" value="TOP-K ADDRESS MEMORY&#xa;&#xa;topk_idxs [B,S,K_total] int32&#xa;tile_idxs = topk_idxs[...,tile_base:tile_base+64]&#xa;tile_idxs [B,S,T], T=64 except final tile." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#493B00;strokeColor=#FFCA28;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="cw-1">
+          <mxGeometry x="40" y="790" width="360" height="220" as="geometry"/>
+        </mxCell>
+        <mxCell id="cw-control" value="TILE CONTROLLER&#xa;&#xa;tile_base = 0,64,128,...&#xa;num_tiles = ceil(K_total/64).&#xa;&#xa;Keeps m,l,o state for each [b,s,h] while changing the address slice.&#xa;K_total=128 -&gt; 2 tiles; K_total=512 -&gt; 8 tiles." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#263238;strokeColor=#90A4AE;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="cw-1">
+          <mxGeometry x="40" y="1120" width="360" height="225" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="cw-valid" value="1. VALIDITY + SAFE INDEX&#xa;&#xa;valid = (idx &gt;= 0) &amp; (idx &lt; N)&#xa;Shape [B,S,T].&#xa;&#xa;safe_idxs = clamp(idx,0,max(N-1,0))&#xa;Shape [B,S,T].&#xa;&#xa;-1 and out-of-range values are safe for memory access but invalid for all math." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#4A1F2A;strokeColor=#EF5350;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="cw-1">
+          <mxGeometry x="520" y="440" width="390" height="275" as="geometry"/>
+        </mxCell>
+        <mxCell id="cw-gather" value="2. GATHER KV TILE&#xa;&#xa;gather_index = safe_idxs.unsqueeze(-1).expand(B,S,T,Dh)&#xa;shape [B,S,T,512].&#xa;&#xa;torch.gather(kv_float, dim=1, index.reshape(B,S*T,512))&#xa;[B,S*T,512] -&gt; reshape [B,S,T,512].&#xa;&#xa;kv_tile = where(valid[...,None], kv_tile, 0)." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#174A45;strokeColor=#26A69A;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="cw-1">
+          <mxGeometry x="980" y="410" width="430" height="330" as="geometry"/>
+        </mxCell>
+        <mxCell id="cw-dot" value="3. QK DOT PRODUCT&#xa;&#xa;scores = einsum('bshd,bstd-&gt;bsht', q_float, kv_tile)&#xa;&#xa;q [B,S,H,512]&#xa;kv_tile [B,S,T,512]&#xa;scores [B,S,H,T].&#xa;&#xa;For each b,s,h,t:&#xa;dot = sum(d=0..511) q[b,s,h,d] * kv_tile[b,s,t,d]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#4A3200;strokeColor=#FFB300;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="cw-1">
+          <mxGeometry x="1480" y="410" width="430" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="cw-mask" value="4. SCALE + INVALID MASK&#xa;&#xa;scores *= softmax_scale.&#xa;Default scale = 512^(-1/2) = 0.04419417.&#xa;&#xa;scores = where(valid.unsqueeze(2), scores, -inf)&#xa;&#xa;masked scores [B,S,H,T]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#493B00;strokeColor=#FFCA28;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="cw-1">
+          <mxGeometry x="1980" y="410" width="390" height="265" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="cw-state" value="RUNNING STATE REGISTER FILE&#xa;&#xa;Initialized once per QCAU call:&#xa;scores_max = -inf [B,S,H]&#xa;sum_exp = 0 [B,S,H]&#xa;acc_o = 0 [B,S,H,512]&#xa;&#xa;All FP32 in reference.&#xa;For one query b,s:&#xa;m [H], l [H], o [H,512]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#263238;strokeColor=#90A4AE;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="cw-1">
+          <mxGeometry x="520" y="820" width="390" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="cw-max" value="5. RUNNING MAX&#xa;&#xa;tile_has_valid = valid.any(dim=-1).unsqueeze(-1)&#xa;shape [B,S,1].&#xa;tile_max = scores.amax(dim=-1) [B,S,H].&#xa;candidate = maximum(scores_max_prev,tile_max).&#xa;scores_max = where(tile_has_valid,candidate,scores_max_prev).&#xa;&#xa;All-invalid tile leaves max unchanged." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#4A1F2A;strokeColor=#EF5350;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="cw-1">
+          <mxGeometry x="980" y="820" width="430" height="285" as="geometry"/>
+        </mxCell>
+        <mxCell id="cw-scale" value="6. OLD ACCUMULATOR RESCALE&#xa;&#xa;old_scale = exp(scores_max_prev - scores_max).&#xa;If tile_has_valid=False: old_scale=1.&#xa;&#xa;This changes the exponent origin of old sum_exp and acc_o before adding this tile.&#xa;&#xa;old_scale [B,S,H]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#493B00;strokeColor=#FFCA28;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="cw-1">
+          <mxGeometry x="1480" y="820" width="430" height="265" as="geometry"/>
+        </mxCell>
+        <mxCell id="cw-prob" value="7. TILE EXPONENTIAL WEIGHTS&#xa;&#xa;safe_scores_max = where(isfinite(scores_max),scores_max,0).&#xa;probs = exp(scores - safe_scores_max[...,None]).&#xa;probs = where(valid.unsqueeze(2),probs,0).&#xa;&#xa;probs [B,S,H,T].&#xa;Invalid entries are exactly zero." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#4A3200;strokeColor=#FFB300;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="cw-1">
+          <mxGeometry x="1980" y="820" width="390" height="275" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="cw-den" value="8. NORMALIZATION MASS UPDATE&#xa;&#xa;sum_exp = sum_exp * old_scale + probs.sum(dim=-1).&#xa;&#xa;sum_exp [B,S,H].&#xa;This is only real KV mass.&#xa;Attention sink is added after all tiles." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#0D2A4A;strokeColor=#42A5F5;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="cw-1">
+          <mxGeometry x="520" y="1220" width="390" height="230" as="geometry"/>
+        </mxCell>
+        <mxCell id="cw-vacc" value="9. WEIGHTED-V ACCUMULATION&#xa;&#xa;acc_o = acc_o * old_scale.unsqueeze(-1) + einsum('bsht,bstd-&gt;bshd', probs, kv_tile).&#xa;&#xa;probs [B,S,H,T]&#xa;kv_tile [B,S,T,512]&#xa;acc_o [B,S,H,512].&#xa;&#xa;For each d: sum_t probs[h,t] * V[t,d]." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#174A45;strokeColor=#26A69A;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft:14;" vertex="1" parent="cw-1">
+          <mxGeometry x="980" y="1210" width="430" height="275" as="geometry"/>
+        </mxCell>
+        <mxCell id="cw-loop" value="10. TILE LOOP FEEDBACK&#xa;&#xa;The new scores_max, sum_exp and acc_o become the previous state for tile_base += 64.&#xa;&#xa;Loop count = ceil(K_total/64).&#xa;No [B,S,H,K_total] probability matrix is stored." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#263238;strokeColor=#90A4AE;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft:14;" vertex="1" parent="cw-1">
+          <mxGeometry x="1480" y="1220" width="430" height="240" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="cw-sink" value="11. ATTENTION SINK&#xa;&#xa;sink = attn_sink.view(1,1,H)&#xa;&#xa;If scores_max finite: exp(sink - scores_max).&#xa;If scores_max=-inf and sink finite: 1.&#xa;If both are -inf: 0.&#xa;&#xa;Sink contributes to denominator only; no V vector." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#493B00;strokeColor=#FFCA28;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="cw-1">
+          <mxGeometry x="1980" y="1220" width="390" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="cw-final" value="12. FINAL DENOMINATOR + OUTPUT&#xa;&#xa;sum_exp += sink_term.&#xa;den = clamp_min(sum_exp,tiny_FP32).&#xa;out = acc_o / den.unsqueeze(-1).&#xa;&#xa;out [B,S,H_local,512].&#xa;Cast to q.dtype.&#xa;&#xa;All-invalid row: acc_o=0, output=0 and remains finite." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#174A45;strokeColor=#26A69A;strokeWidth=3;fontSize=15;fontStyle=1;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=14;spacingLeft=16;" vertex="1" parent="cw-1">
+          <mxGeometry x="2480" y="920" width="500" height="300" as="geometry"/>
+        </mxCell>
+        <mxCell id="cw-next" value="OUTPUT TO Attention.forward()&#xa;&#xa;o [B,S,H_local,512]&#xa;&#xa;Next operations in model.py:&#xa;inverse RoPE -&gt; group view -&gt; wo_a einsum -&gt; wo_b row-parallel linear." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#0D2A4A;strokeColor=#42A5F5;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="cw-1">
+          <mxGeometry x="2480" y="1330" width="500" height="210" as="geometry"/>
+        </mxCell>
+        <mxCell id="cw-note" value="FUNCTIONAL CONTRACT FOR RTL&#xa;&#xa;Required recurrence:&#xa;m_new = max(m_old,tile_max) with invalid-tile no-op.&#xa;l_new = l_old*exp(m_old-m_new) + sum(exp(score-m_new)).&#xa;o_new = o_old*exp(m_old-m_new) + sum(exp(score-m_new)*V).&#xa;&#xa;The physical PE count, SRAM banking and exp/reciprocal approximation are implementation choices; these dependencies and masks are not optional." style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#263238;strokeColor=#FFB300;strokeWidth=2;fontSize=14;fontColor=#FFFFFF;align=left;verticalAlign=top;spacingTop=12;spacingLeft=14;" vertex="1" parent="cw-1">
+          <mxGeometry x="520" y="1580" width="1870" height="250" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="cw-e1" value="tile_idxs [B,S,T]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FFCA28;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-idx" target="cw-valid"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e2" value="safe_idxs [B,S,T]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FFCA28;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-valid" target="cw-gather"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e3" value="kv_float [B,N,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#26C281;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-kv" target="cw-gather"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e4" value="kv_tile [B,S,T,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#26A69A;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-gather" target="cw-dot"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e5" value="q_float [B,S,H,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#42A5F5;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-q" target="cw-dot"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e6" value="scores [B,S,H,T]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FFB300;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-dot" target="cw-mask"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e7" value="valid [B,S,T]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#EF5350;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-valid" target="cw-mask"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e8" value="masked scores + tile_max" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FFCA28;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-mask" target="cw-max"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e9" value="m_old [B,S,H]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#90A4AE;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-state" target="cw-max"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e10" value="m_old,m_new [B,S,H]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FFCA28;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-max" target="cw-scale"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e11" value="m_new [B,S,H]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FFB300;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-scale" target="cw-prob"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e12" value="valid + masked scores" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FFCA28;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-mask" target="cw-prob"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e13" value="probs [B,S,H,T]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FFB300;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-prob" target="cw-den"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e14" value="probs + kv_tile + old_scale" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#26A69A;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-prob" target="cw-vacc"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e15" value="l_old + mass" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#42A5F5;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-state" target="cw-den"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e16" value="o_old + weighted V" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#26A69A;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-state" target="cw-vacc"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e17" value="m,l,o next tile" style="dashed=1;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#90A4AE;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-den" target="cw-loop"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e18" value="m,l,o next tile" style="dashed=1;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;strokeColor=#90A4AE;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-vacc" target="cw-loop"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e19" value="feedback tile_base += 64" style="dashed=1;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;strokeColor=#90A4AE;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-loop" target="cw-control"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e20" value="next tile idxs" style="dashed=1;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;strokeColor=#90A4AE;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-control" target="cw-idx"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e21" value="sink [H]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;strokeColor=#FFCA28;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-sink" target="cw-final"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e22" value="l_after_tiles [B,S,H]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;strokeColor=#42A5F5;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-den" target="cw-final"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e23" value="acc_o [B,S,H,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;strokeColor=#26A69A;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-vacc" target="cw-final"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e24" value="o [B,S,H_local,512]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;strokeColor=#42A5F5;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-final" target="cw-next"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e25" value="m_new [B,S,H]" style="dashed=1;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#EF5350;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-max" target="cw-loop"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e26" value="register update: m,l,o" style="dashed=1;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#90A4AE;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-loop" target="cw-state"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="cw-e27" value="scores_max [B,S,H] for sink_term" style="dashed=1;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;strokeColor=#EF5350;strokeWidth=2;endArrow=block;" edge="1" parent="cw-1" source="cw-max" target="cw-final"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

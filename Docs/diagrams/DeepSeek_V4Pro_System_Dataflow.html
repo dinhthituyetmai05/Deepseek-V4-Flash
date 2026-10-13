@@ -1,0 +1,140 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DeepSeek-V4-Pro — End-to-end Dataflow (8 card · 4 chip · PCIe)</title>
+<style>
+ body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#fff;color:#1a1a1a;line-height:1.45}
+ .wrap{max-width:1500px;margin:0 auto;padding:16px 20px 50px}
+ h1{font-size:19px;margin:0 0 4px}
+ p{font-size:13px;color:#333}.mut{color:#6b7280;font-size:12px}
+ .ctl{margin:10px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+ .b{padding:5px 14px;border:.5px solid #cbd5e1;border-radius:8px;cursor:pointer;font-size:13px;background:#fff}
+ .b.pri{background:#1e2761;color:#fff;border-color:transparent}
+ .scroll{overflow-x:auto;border:.5px solid #e5e7eb;border-radius:10px;background:#fff}
+ .cap{margin-top:10px;font-size:14px;background:#f1f5f9;border-left:4px solid #1e2761;border-radius:6px;padding:11px 14px;min-height:46px}
+ .badge{display:inline-block;font-size:11px;font-weight:700;border-radius:6px;padding:2px 9px;margin-right:8px;vertical-align:middle}
+ .lg{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#6b7280;margin-right:14px}
+ .sw{width:13px;height:13px;border-radius:3px;display:inline-block;border:.5px solid #999}
+ #markerA,#markerB{transition:transform .55s cubic-bezier(.4,0,.2,1)}
+</style></head>
+<body><div class="wrap">
+<h1>DeepSeek-V4-Pro — Luồng dữ liệu end-to-end qua phần cứng <span class="mut">(8 card chain · 4 chip mesh · PCIe star)</span></h1>
+<p>Theo dõi <b style="color:#1e6fd0">User A — U6 (xanh)</b> và <b style="color:#1f9d57">User B — U7 (lục)</b>, mỗi chunk 256 token, đi từ CPU qua PCIe vào card, phân phối TP/EP giữa 4 chip, gom lại, chuyển sang card kế (layer khác), tới Card 7 ra token rồi quay về CPU (decode). Bấm <b>Play</b> hoặc <b>Next</b>.</p>
+<div class="ctl">
+ <button class="b pri" id="play">▶ Play</button>
+ <button class="b" id="prev">◀ Prev</button>
+ <button class="b" id="next">Next ▶</button>
+ <button class="b" id="restart">↻ Restart</button>
+ <span class="mut" id="ind"></span>
+</div>
+<div class="lg"><span class="sw" style="background:#1e6fd0"></span>User A (U6)</div>
+<div class="lg"><span class="sw" style="background:#1f9d57"></span>User B (U7)</div>
+<div class="lg"><span class="sw" style="background:#b26b00"></span>PCIe (host↔card)</div>
+<div class="lg"><span class="sw" style="background:#6b21a8"></span>Card-chain / ring</div>
+<div class="lg"><span class="sw" style="background:#0ea5b5"></span>SerDes mesh (4 chip)</div>
+<div class="scroll"><svg id="svg" viewBox="0 0 1460 740" style="min-width:1300px;display:block"></svg></div>
+<div class="cap" id="cap"></div>
+
+<script>
+(function(){
+ var W=1460,H=740;
+ var CPU={x:640,y:22,w:190,h:70}, cpuB={x:735,y:92};
+ var NC=8, sx=function(i){return 30+170*i;}, cW=150, cTop=212, cH=152, cyMid=290;
+ var cardCX=function(i){return sx(i)+cW/2;};
+ var LAYERS=["Emb+L1–8","L9–16","L17–24","L25–32","L33–40","L41–48","L49–56","L57–61+Head"];
+ var EXP=["e0–95","e96–191","e192–287","e288–383"], HEAD=["h0–31","h32–63","h64–95","h96–127"];
+ function chips(i){var x=sx(i);return {TL:{x:x+40,y:260},TR:{x:x+110,y:260},BL:{x:x+40,y:308},BR:{x:x+110,y:308}};}
+ var A="#1e6fd0",B="#1f9d57",PC="#b26b00",CH="#6b21a8",ME="#0ea5b5";
+ function r2(){}
+ function RC(x,y,w,h,f,s,sw,rx){return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="'+(rx||7)+'" fill="'+f+'" stroke="'+s+'" stroke-width="'+(sw||1)+'"/>';}
+ function LN(x1,y1,x2,y2,c,w,d,ar){return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+c+'" stroke-width="'+w+'"'+(d?' stroke-dasharray="'+d+'"':'')+(ar?' marker-end="url(#ar)"':'')+'/>';}
+ function PT(x,y,t,c,fs,b,a){return '<text x="'+x+'" y="'+y+'" font-size="'+(fs||11)+'" fill="'+c+'" text-anchor="'+(a||'middle')+'"'+(b?' font-weight="700"':'')+'>'+t+'</text>';}
+
+ // marker anchors
+ function posOf(v){if(v==='cpu')return {x:700,y:150};if(v==='out')return {x:770,y:150};if(v==null)return null;return {x:cardCX(v),y:cyMid};}
+
+ // ---------- STEPS ----------
+ var S=[
+  {ph:'P',cap:"<b>PREFILL.</b> CPU token hoá prompt của User A (U6, xanh) và User B (U7, lục) thành token ID (4 B/token). Mỗi chunk = 256 token.",hiCpu:1,a:'cpu',b:null},
+  {ph:'P',cap:"Token ID của A gửi qua <b style='color:#b26b00'>PCIe</b> vào <b>Card 0</b> (chỉ ~1 KB/chunk — rất nhỏ).",pcie:0,a:'cpu',b:null},
+  {ph:'P',cap:"<b>Card 0 · Embedding:</b> một chip tra bảng embedding (HBM) → hidden X (14 KB/token), ghi vào buffer.",card:0,chip:'TL',a:0,b:null},
+  {ph:'P',cap:"<b>TP (attention):</b> X được nhân bản tới cả 4 chip qua <b style='color:#0ea5b5'>SerDes mesh</b>; mỗi chip tính slice <b>32 head</b> riêng — song song.",card:0,mesh:0,mode:'rep',a:0,b:null},
+  {ph:'P',cap:"<b>All-reduce</b> qua mesh: 4 chip cộng kết quả attention (ô) thành output thống nhất.",card:0,mesh:0,mode:'ar',a:0,b:null},
+  {ph:'P',cap:"<b>EP (MoE):</b> router chọn <b>top-6 expert</b>; <b>all-to-all dispatch</b> gửi token tới chip giữ expert tương ứng (mỗi chip 96 expert).",card:0,mesh:0,mode:'disp',a:0,b:null},
+  {ph:'P',cap:"Mỗi chip tính expert của mình; <b>all-to-all combine</b> gom kết quả y về <b>1 chip (home)</b>.",card:0,mesh:0,mode:'comb',a:0,b:null,gather:'TL'},
+  {ph:'P',cap:"Card 0 xong dải layer → <b style='color:#6b21a8'>residual X (56 KB/token)</b> sang <b>Card 1</b> qua card-chain. <b>User B vào Card 0</b> → pipeline 2 user!",chain:0,a:1,b:0},
+  {ph:'P',cap:"Mỗi card chạy dải layer của nó với <b>CÙNG TP/EP</b> bên trong; chunk tiến 1 card mỗi stage. <b>8 card = 8 stage</b> chạy song song cho 2 user.",chain:2,a:3,b:2},
+  {ph:'P',cap:"… A tiếp tục tiến qua các card (mỗi card = một nhóm layer khác nhau), B bám sau 1 card.",chain:5,a:6,b:5},
+  {ph:'P',cap:"<b>Card 7</b> — các layer cuối + <b>LM Head</b> → logits (phân phối xác suất token kế).",card:7,a:7,b:6},
+  {ph:'P',cap:"Logits của A trả về <b style='color:#b26b00'>CPU qua PCIe</b>.",pcie:7,a:'out',b:7},
+  {ph:'P',cap:"<b>CPU sample</b> ra 1 token mới cho User A từ logits.",hiCpu:1,a:'cpu',b:'out'},
+  {ph:'D',cap:"<b>DECODE.</b> Token vừa sinh quay lại <b>Card 0</b> qua <b style='color:#6b21a8'>ring chain</b> (hoặc PCIe). Giờ chỉ 1 token đi lại HẾT 8 card.",ring:1,a:0,b:'cpu'},
+  {ph:'D',cap:"1 token đi qua 8 card (vẫn TP/EP trong mỗi card như prefill) — nhưng memory-bound (đọc weight nhiều cho 1 token).",a:4,b:3},
+  {ph:'D',cap:"Card 7 → logits → <b style='color:#b26b00'>PCIe về CPU</b>; <b>CPU đọc ra 1 token mới</b>.",pcie:7,a:'out',b:6},
+  {ph:'D',cap:"Lặp: mỗi vòng decode sinh 1 token kế, đi đủ 8 card rồi về CPU — cho tới khi chuỗi kết thúc.",ring:1,a:0,b:'out'}
+ ];
+
+ // ---------- BUILD LAYER ----------
+ function meshLines(i,mode){var c=chips(i),pts=[c.TL,c.TR,c.BL,c.BR];
+  var pairs=[[0,1],[2,3],[0,2],[1,3],[0,3],[1,2]];
+  var col=mode=='rep'?'#9aa3b2':mode=='ar'?A:mode=='disp'?PC:mode=='comb'?B:ME;
+  var w=mode?2.4:1; var s='';
+  pairs.forEach(function(p){s+=LN(pts[p[0]].x,pts[p[0]].y,pts[p[1]].x,pts[p[1]].y,col,w,mode?'':'',0);});
+  return s;}
+ function buildLayer(st){
+  var s='';
+  // PCIe star (light) + highlight
+  for(var i=0;i<NC;i++){var hl=(st.pcie===i);s+=LN(cpuB.x,cpuB.y,cardCX(i),cTop,hl?PC:'#e7d3b3',hl?3:1,'5,4',hl);}
+  // ring (decode feedback)
+  var ringC=st.ring?CH:'#e3d6f3', ringW=st.ring?3:1.4;
+  s+='<path d="M '+cardCX(7)+' '+(cTop+cH)+' L '+cardCX(7)+' 470 L '+cardCX(0)+' 470 L '+cardCX(0)+' '+(cTop+cH)+'" fill="none" stroke="'+ringC+'" stroke-width="'+ringW+'" stroke-dasharray="6,5" marker-end="url(#arP)"/>';
+  s+=PT(cardCX(3)+50,486,'decode feedback (ring chain): token ID quay về Card 0',ringC,11,st.ring?1:0);
+  // CPU
+  var cpuHi=st.hiCpu;s+=RC(CPU.x,CPU.y,CPU.w,CPU.h,cpuHi?'#28316b':'#1e2761',cpuHi?'#FFB81C':'#1e2761',cpuHi?3:1);
+  s+=PT(CPU.x+CPU.w/2,CPU.y+30,'CPU Host Node','#fff',15,1);s+=PT(CPU.x+CPU.w/2,CPU.y+50,'tokenize · sample · I/O','#cdd9f7',11);
+  // chain arrows between cards
+  for(var i=0;i<NC-1;i++){var hl=(st.chain===i);s+=LN(sx(i)+cW,cyMid,sx(i+1),cyMid,hl?CH:'#cbb9e6',hl?3.4:1.6,'',1);}
+  s+=PT(cardCX(3)+85,196,'card-chain →  residual 56 KB/token','#6b21a8',11);
+  // cards
+  for(var i=0;i<NC;i++){var cx=sx(i),acc=(st.card===i)||(st.mesh===i),last=(i==7);
+   s+=RC(cx,cTop,cW,cH,last?'#f3f9ec':'#f5f7fd',acc?'#FFB81C':(last?'#27500A':'#9fb0d6'),acc?3:1.2);
+   s+=PT(cx+cW/2,cTop+18,'Card '+i,last?'#27500A':'#1e2761',12.5,1);
+   s+=PT(cx+cW/2,cTop+33,LAYERS[i],'#6b7280',9.5);
+   // chips
+   var cc=chips(i),keys=['TL','TR','BL','BR'];
+   keys.forEach(function(k,ci){var c=cc[k];var on=(st.card===i&&(st.chip===k||st.gather===k));
+     s+=RC(c.x-32,c.y-19,64,38,on?'#1746a3':'#2e6fb5','#fff',on?2:0.6,4);
+     s+=PT(c.x,c.y-3,'C'+i+'.'+ci,'#fff',9,1);
+     s+=PT(c.x,c.y+9,(st.mode=='disp'||st.mode=='comb')?EXP[ci]:HEAD[ci],'#dbe9fb',7);
+   });
+   // mesh
+   s+=meshLines(i, st.mesh===i?st.mode:null);
+   if(st.mesh===i){var lab=st.mode=='rep'?'TP: nhân bản X → 4 chip':st.mode=='ar'?'all-reduce ô':st.mode=='disp'?'EP: all-to-all dispatch':'all-to-all combine → home';
+     s+=PT(cx+cW/2,cTop+cH-6,lab,st.mode=='rep'?'#5b6472':st.mode=='ar'?A:st.mode=='disp'?PC:B,10,1);}
+  }
+  return s;
+ }
+
+ // ---------- RENDER ----------
+ var svg=document.getElementById('svg');
+ svg.innerHTML='<defs>'
+  +'<marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#6b21a8"/></marker>'
+  +'<marker id="arP" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#6b21a8"/></marker>'
+  +'</defs><g id="layer"></g>'
+  +'<g id="markerB"><circle r="12" fill="'+B+'" stroke="#fff" stroke-width="2"/><text y="4" font-size="10" fill="#fff" text-anchor="middle" font-weight="700">U7</text></g>'
+  +'<g id="markerA"><circle r="12" fill="'+A+'" stroke="#fff" stroke-width="2"/><text y="4" font-size="10" fill="#fff" text-anchor="middle" font-weight="700">U6</text></g>';
+ var layer=document.getElementById('layer'),mA=document.getElementById('markerA'),mB=document.getElementById('markerB');
+ var cur=0,timer=null;
+ function setMarker(g,pos){if(!pos){g.style.display='none';return;}g.style.display='';g.setAttribute('transform','translate('+pos.x+','+pos.y+')');}
+ function render(i){var st=S[i];layer.innerHTML=buildLayer(st);setMarker(mA,posOf(st.a));setMarker(mB,posOf(st.b));
+  document.getElementById('cap').innerHTML='<span class="badge" style="background:'+(st.ph=='P'?'#1e2761':'#27500A')+';color:#fff">'+(st.ph=='P'?'PREFILL':'DECODE')+'</span>'+st.cap;
+  document.getElementById('ind').textContent='Bước '+(i+1)+' / '+S.length;}
+ function go(i){cur=(i+S.length)%S.length;render(cur);}
+ document.getElementById('next').onclick=function(){go(cur+1);};
+ document.getElementById('prev').onclick=function(){go(cur-1);};
+ document.getElementById('restart').onclick=function(){stop();go(0);};
+ function stop(){if(timer){clearInterval(timer);timer=null;document.getElementById('play').textContent='▶ Play';document.getElementById('play').classList.add('pri');}}
+ document.getElementById('play').onclick=function(){if(timer){stop();}else{this.textContent='⏸ Pause';this.classList.remove('pri');timer=setInterval(function(){go(cur+1);},2400);}};
+ go(0);
+})();
+</script>
+<p class="mut" style="margin-top:18px">DeepSeek-V4-Pro Accelerator · tài liệu nội bộ · end-to-end dataflow (PCIe star + 8-card chain + 4-chip SerDes mesh). Bổ trợ <code>00_README_Design_Flow.md</code>.</p>
+</div></body></html>
